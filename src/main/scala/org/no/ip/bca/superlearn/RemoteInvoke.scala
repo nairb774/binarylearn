@@ -36,8 +36,17 @@ class InvokeOut(out: ObjectOutputStream) extends ReActor {
     }
     
     def invoke(proxy: AnyRef, method: Method, args: Array[AnyRef]): AnyRef = {
-      InvokeOut.this ! Invoke(id, getSig(method), args)
-      null
+      method.getName match {
+        case "equals" =>
+          (this == args(0)).asInstanceOf[AnyRef]
+        case "hashCode" =>
+          (this.hashCode).asInstanceOf[AnyRef]
+        case "toString" =>
+          this.toString
+        case _ =>
+          InvokeOut.this ! Invoke(id, getSig(method), args)
+          null
+      }
     }
   }
     
