@@ -9,6 +9,16 @@ import org.no.ip.bca.scala.utils.actor.ReActor
 private object InvokeTypes {
   case class MethodSig(name: String, types: Array[String])
   case class Invoke(id: Int, method: MethodSig, args: Array[AnyRef])
+  val primitives = Map (
+      "boolean" -> classOf[Boolean],
+      "byte" -> classOf[Byte],
+      "short" -> classOf[Short],
+      "char" -> classOf[Char],
+      "int" -> classOf[Int],
+      "long" -> classOf[Long],
+      "float" -> classOf[Float],
+      "double" -> classOf[Double]
+  )
 }
 
 class InvokeOut(out: ObjectOutputStream) extends ReActor {
@@ -68,7 +78,13 @@ class InvokeIn(in: ObjectInputStream) extends Runnable {
       if (method == null) {
         val clazz = obj.getClass
         val classLoader = clazz.getClassLoader
-        val paramTypes = methodSig.types map { Class.forName(_, true, classLoader) }
+        val paramTypes = try {
+          methodSig.types map primitives.withDefault(Class.forName(_, true, classLoader))
+        } catch {
+            case e =>
+              e.printStackTrace
+              throw e
+        }
         method = clazz.getMethod(methodSig.name, paramTypes: _*)
         methods.put(methodSig, method)
       }
