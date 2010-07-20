@@ -50,7 +50,7 @@ private object ServerActor {
 }
 
 trait ClientOutbound {
-  def newWork(matrix: Matrix, ranges: Ranges.Pair*)
+  def newWork(matrix: Matrix, ranges: Ranges.Pair*): Unit
   def sendData(point: Long, data: Array[Byte]): Unit
   def assigned(id: UUID, range: Ranges.Pair): Unit
 }

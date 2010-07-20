@@ -47,7 +47,7 @@ class ClientActorBridge(client: ClientActor) extends ClientOutbound {
 trait ServerOutbound {
   def requestPoint(point: Long): Unit
   def sendMatrix(matrix: Matrix, count: Long): Unit
-  def request(id: UUID, range: Ranges.Pair)
+  def request(id: UUID, range: Ranges.Pair): Unit
 }
 
 class ClientActor(
