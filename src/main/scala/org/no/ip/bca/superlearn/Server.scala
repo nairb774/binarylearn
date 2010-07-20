@@ -9,7 +9,7 @@ object Server {
     import java.io._
     import java.net._
     
-    def main(args: Array[String]) = {
+    def main(args: Array[String]): Unit = {
         val props = new Props(args(0))
         val port = props.serverPort
         val ssocket = new ServerSocket(port)
