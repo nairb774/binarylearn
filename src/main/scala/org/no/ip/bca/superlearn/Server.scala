@@ -91,7 +91,8 @@ class ServerActor(
       } else {
         clients.keys foreach { _.newRanges(assigned: _*) }
       }
-    case RequestPoint(point, client) => client.sendData(point, dataManager.read(point))
+    case RequestPoint(point, client) =>
+      client.sendData(point, dataManager.read(point))
     case RecieveMatrix(matrix, _count, client) =>
       // NOTE: matrix could be sent right before disconnect (not necessarily at end of round)
       // Mark off client

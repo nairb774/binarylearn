@@ -7,7 +7,7 @@ object DayBinParser {
         val dataManager = props.dataManager
         val size = dataManager.size
         source.getLines.zipWithIndex foreach { case (line, i) =>
-            val out = line.toCharArray.take(size).map{ c =>
+            val out = line.toCharArray.take(size) map { c =>
                 if (c == 'T') 1.toByte else 0.toByte
             }
             dataManager.write(i, out)
