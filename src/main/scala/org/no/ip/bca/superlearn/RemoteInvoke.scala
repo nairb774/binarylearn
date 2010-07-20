@@ -1,5 +1,9 @@
 package org.no.ip.bca.superlearn
 
+import java.io.{ObjectInputStream, ObjectOutputStream}
+import java.lang.reflect.{InvocationHandler, Method, Proxy}
+import java.util.IdentityHashMap
+
 import org.no.ip.bca.scala.utils.actor.ReActor
 
 private object InvokeTypes {
@@ -7,11 +11,10 @@ private object InvokeTypes {
   case class Invoke(id: Int, method: MethodSig, args: Array[AnyRef])
 }
 
-class InvokeOut(out: java.io.ObjectOutputStream) extends ReActor {
+class InvokeOut(out: ObjectOutputStream) extends ReActor {
   import InvokeTypes._
-  private class InvokeHandler(id: Int) extends java.lang.reflect.InvocationHandler {
-    import java.lang.reflect.Method
-    private val methods = new java.util.IdentityHashMap[Method, MethodSig]
+  private class InvokeHandler(id: Int) extends InvocationHandler {
+    private val methods = new IdentityHashMap[Method, MethodSig]
     
     private def getSig(method: Method) = methods.synchronized {
       var sig = methods.get(method)
@@ -31,7 +34,7 @@ class InvokeOut(out: java.io.ObjectOutputStream) extends ReActor {
   def open[T](id: Int)(implicit m: Manifest[T]): T = {
     val handler = new InvokeHandler(id)
     val clazz = m.erasure
-    java.lang.reflect.Proxy.newProxyInstance(clazz.getClassLoader, Array(clazz), handler).asInstanceOf[T]
+    Proxy.newProxyInstance(clazz.getClassLoader, Array(clazz), handler).asInstanceOf[T]
   }
   override def init = {
     super.init
@@ -51,11 +54,10 @@ class InvokeOut(out: java.io.ObjectOutputStream) extends ReActor {
   }
 }
 
-class InvokeIn(in: java.io.ObjectInputStream) extends Runnable {
+class InvokeIn(in: ObjectInputStream) extends Runnable {
   import InvokeTypes._
   private class Invoker[T <: AnyRef](obj: T) extends ReActor {
-    import java.lang.reflect.Method
-    private val methods = new java.util.IdentityHashMap[MethodSig, Method]
+    private val methods = new IdentityHashMap[MethodSig, Method]
     
     def reAct = {
       case Invoke(_, methodSig, args) => lookupMethod(methodSig).invoke(obj, args: _*)
