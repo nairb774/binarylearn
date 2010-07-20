@@ -13,7 +13,7 @@ object Server {
         val props = new Props(args(0))
         val port = props.serverPort
         val ssocket = new ServerSocket(port)
-        val server = new ServerActor(props.dataManager, props.matrix)
+        val server = new ServerActor(props.dataManager, props.matrixRecorder, props.matrix)
         server.start
         handleSocket(props, server, ssocket)
     }
@@ -66,6 +66,7 @@ class ServerActorBridge(server: ServerActor, private var _client: ClientOutbound
 
 class ServerActor(
     dataManager: DataManager,
+    matrixRecorder: MatrixRecorder,
     private var currentMatrix: Matrix
     ) extends ReActor {
   import ServerActor._
@@ -113,9 +114,9 @@ class ServerActor(
   }
   
   private def shift = {
-    println(System.nanoTime)
-    UtilMethods.mult(inProgress.m, slope / count.toDouble)
+    val error = UtilMethods.mult(inProgress.m, slope / count.toDouble, currentMatrix.m)
     currentMatrix = inProgress
+    matrixRecorder.record(currentMatrix, error)
     inProgress = null
     count = 0
     outstanding = dataManager.ranges

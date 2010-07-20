@@ -77,6 +77,11 @@ class Props(file: java.io.File) {
         new DataManager(dataFolder, size, max, spans)
     }
     
+    lazy val matrixRecorder = {
+        val folder = new File(props.getProperty("matrix.folder"))
+        new MatrixRecorder(folder)
+    }
+    
     lazy val matrix = {
         val location = new File(props.getProperty("matrix.location"))
         val w = Integer.parseInt(props.getProperty("matrix.w"))
