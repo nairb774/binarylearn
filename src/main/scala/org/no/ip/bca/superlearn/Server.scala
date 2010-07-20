@@ -23,7 +23,7 @@ object Server {
         socket.setSoTimeout(10 * 1000)
         val out = new InvokeOut(new ObjectOutputStream(new BufferedOutputStream(socket.getOutputStream)))
         out.start
-        val bridge = new ServerActorBridge(server, out.open(0))
+        val bridge = new ServerActorBridge(server, out.open[ClientOutbound](0))
         val in = new InvokeIn(new ObjectInputStream(new BufferedInputStream(socket.getInputStream)))
         in + (0 -> bridge)
         new Thread(in).start
