@@ -15,12 +15,12 @@ object Server {
         val ssocket = new ServerSocket(port)
         val server = new ServerActor(props.dataManager, props.matrix)
         server.start
-        handleSocket(server, ssocket)
+        handleSocket(props, server, ssocket)
     }
     
-    def handleSocket(server: ServerActor, ssocket: ServerSocket): Unit = {
+    private def handleSocket(props: Props, server: ServerActor, ssocket: ServerSocket): Unit = {
         val socket = ssocket.accept
-        socket.setSoTimeout(10 * 1000)
+        socket.setSoTimeout(props.timeout)
         val out = new InvokeOut(new ObjectOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
             override def handleException(e: Exception) = {
                 super.handleException(e)
@@ -38,7 +38,7 @@ object Server {
         }
         in + (0 -> bridge)
         new Thread(in).start
-        handleSocket(server, ssocket)
+        handleSocket(props, server, ssocket)
     }
 }
 
