@@ -57,14 +57,8 @@ trait ClientOutbound {
 
 class ServerActorBridge(server: ServerActor, private var _client: ClientOutbound) extends ServerOutbound {
   import ServerActor._
-  if (_client != null) {
-      server ! Connect(_client)
-  }
+  server ! Connect(_client)
   
-  /*def client_=(client: ClientOutbound) = {
-    _client = client
-    server ! Connect(client)
-  }*/
   def request(id: UUID, range: Ranges.Pair) = server ! Request(id, range, _client)
   def sendMatrix(matrix: Matrix, count: Long) = server ! RecieveMatrix(matrix, count, _client)
   def requestPoint(point: Long) = server ! RequestPoint(point, _client)
