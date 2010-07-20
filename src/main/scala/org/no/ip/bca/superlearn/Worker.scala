@@ -32,7 +32,6 @@ case class Matrix(w: Int, h: Int, m: Array[Double])
 
 private object ClientActor {
   case class NewWork(matrix: Matrix, ranges: Ranges.Pair*)
-  case class NewRanges(ranges: Ranges.Pair*)
   case class Assigned(id: UUID, range: Ranges.Pair)
   case class Data(point: Long, data: Array[Byte])
   case class Finished(future: RunnableFuture[Matrix])
@@ -40,7 +39,6 @@ private object ClientActor {
 
 class ClientActorBridge(client: ClientActor) extends ClientOutbound {
   import ClientActor._
-  def newRanges(ranges: Ranges.Pair*) = client ! NewRanges(ranges: _*)
   def assigned(id: UUID, range: Ranges.Pair) = client ! Assigned(id, range)
   def sendData(point: Long, data: Array[Byte]) = client ! Data(point, data)
   def newWork(matrix: Matrix, ranges: Ranges.Pair*) = client ! NewWork(matrix, ranges: _*)
@@ -74,27 +72,20 @@ class ClientActor(
     super.to(f)
   }
   
-  private def newRanges: PF = {
-    case NewRanges(ranges) => availableRanges |= Ranges(ranges)
-  }
-  
   private def finished(f: => Nothing): PF = {
     case Finished(future) => if (future eq work) f
   }
   
   private def workingState: PF =
       finished(to(finishedWorkingState)) orElse
-      myAssigned(to(verifiedWorkingState)) orElse
-      newRanges
+      myAssigned(to(verifiedWorkingState))
   
   private def finishedWorkingState: PF =
-      myAssigned(commit) orElse
-      newRanges
+      myAssigned(commit)
   
   private def verifiedWorkingState: PF =
       finished(commit) orElse
-      otherAssigned orElse
-      newRanges
+      otherAssigned
   
   private def awaitMatrixState: PF = {
     case NewWork(matrix, ranges) =>
@@ -115,8 +106,7 @@ class ClientActor(
       dataManager.write(point, data)
       findWork
   }: PF) orElse
-     otherAssigned orElse
-     newRanges
+     otherAssigned
   
   private def myAssigned(success: => Nothing): PF = {
     case Assigned(_id, range) =>
