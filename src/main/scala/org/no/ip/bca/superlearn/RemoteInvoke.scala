@@ -21,6 +21,36 @@ private object InvokeTypes {
   )
 }
 
+object ActiveProxy {
+    def apply[T <: AnyRef](obj: T)(implicit m: ClassManifest[T]): T = {
+        val handler = new ActiveProxy(obj)
+        handler.start
+        val clazz = m.erasure
+        Proxy.newProxyInstance(clazz.getClassLoader, Array(clazz), handler).asInstanceOf[T]
+    }
+}
+
+private class ActiveProxy[T <: AnyRef](obj: T) extends InvocationHandler with ReActor {
+    private case class I(method: Method, args: Array[AnyRef])
+    def invoke(proxy: AnyRef, method: Method, args: Array[AnyRef]): AnyRef = {
+      method.getName match {
+        case "equals" =>
+          (this == args(0)).asInstanceOf[AnyRef]
+        case "hashCode" =>
+          (this.hashCode).asInstanceOf[AnyRef]
+        case "toString" =>
+          this.toString
+        case _ =>
+          this ! I(method, args)
+          null
+      }
+    }
+    
+    val reAct: PartialFunction[Any, Unit] = {
+        case I(method, args) => method.invoke(obj, args: _*)
+    }
+}
+
 class InvokeOut(out: ObjectOutputStream) extends ReActor {
   import InvokeTypes._
   private class InvokeHandler(id: Int) extends InvocationHandler {
