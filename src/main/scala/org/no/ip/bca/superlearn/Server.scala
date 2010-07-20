@@ -21,10 +21,21 @@ object Server {
     def handleSocket(server: ServerActor, ssocket: ServerSocket): Unit = {
         val socket = ssocket.accept
         socket.setSoTimeout(10 * 1000)
-        val out = new InvokeOut(new ObjectOutputStream(new BufferedOutputStream(socket.getOutputStream)))
+        val out = new InvokeOut(new ObjectOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
+            override def handleException(e: Exception) = {
+                super.handleException(e)
+                exit()
+            }
+        }
         out.start
         val bridge = new ServerActorBridge(server, out.open[ClientOutbound](0))
-        val in = new InvokeIn(new ObjectInputStream(new BufferedInputStream(socket.getInputStream)))
+        val in = new InvokeIn(new ObjectInputStream(new BufferedInputStream(socket.getInputStream))) {
+            override def run = try {
+                super.run
+            } finally {
+                exit()
+            }
+        }
         in + (0 -> bridge)
         new Thread(in).start
         handleSocket(server, ssocket)
