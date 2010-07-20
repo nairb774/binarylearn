@@ -48,7 +48,6 @@ class MatrixWorker(
 }
 
 import java.util.concurrent.FutureTask
-import org.no.ip.bca.scala.ConcurrencyHelpers._
 
 class MatrixWorkerFuture(
     matrixWorker: MatrixWorker,
