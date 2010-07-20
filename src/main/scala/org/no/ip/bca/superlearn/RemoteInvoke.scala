@@ -82,19 +82,23 @@ class InvokeIn(in: ObjectInputStream) extends Runnable {
   def start = new Thread(this).start
   def +[T <: AnyRef](pair: (Int, T)) = map += (pair._1 -> new Invoker(pair._2))
   def run: Unit = {
-    val map0 = map
-    do {
-      val id = in.readInt
-      if (id < 0) {
-        in.close
-        map0.values foreach {_.stop}
-        return
-      } else {
-        val sig = in.readObject.asInstanceOf[MethodSig]
-        val args = in.readUnshared.asInstanceOf[Array[AnyRef]]
-        map0(id) ! Invoke(id, sig, args)
+      map.values foreach {_.start}
+      try {
+          run0(map)
+      } finally {
+          map.values foreach {_.stop}
+          in.close
       }
-    } while (true)
+  }
+  
+  private def run0(map: Map[Int, Invoker[_]]): Unit = {
+      val id = in.readInt
+      if (id >= 0) {
+          val sig = in.readObject.asInstanceOf[MethodSig]
+          val args = in.readUnshared.asInstanceOf[Array[AnyRef]]
+          map(id) ! Invoke(id, sig, args)
+          run0(map)
+      }
   }
 }
 
