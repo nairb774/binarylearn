@@ -31,7 +31,7 @@ class InvokeOut(out: ObjectOutputStream) extends ReActor {
     }
   }
     
-  def open[T](id: Int)(implicit m: Manifest[T]): T = {
+  def open[T](id: Int)(implicit m: ClassManifest[T]): T = {
     val handler = new InvokeHandler(id)
     val clazz = m.erasure
     Proxy.newProxyInstance(clazz.getClassLoader, Array(clazz), handler).asInstanceOf[T]
