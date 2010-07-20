@@ -128,9 +128,13 @@ class UtilMethods {
         }
     }
     
-    public static void mult(final double[] a, final double b) {
+    public static double mult(final double[] a, final double s, final double[] b) {
+        double error = 0.0;
         for(int i = 0; i < a.length; i++) {
-            a[i] *= b;
+            double e = a[i] * s;
+            a[i] = e + b[i];
+            error += e * e;
         }
+        return error;
     }
 }
