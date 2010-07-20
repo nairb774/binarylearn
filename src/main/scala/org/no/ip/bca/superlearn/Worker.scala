@@ -1,25 +1,15 @@
 package org.no.ip.bca.superlearn
 
-object Worker {
-  import java.io._
-  import java.nio._
-  import java.util._
-  
-  def main(args: Array[String]): Unit = {
-    val props = new Props(args(0))
-    val dataManager = props.dataManager
-    val matrix = props.matrix
-    
-    val server = new ServerActor(dataManager, matrix)
-    server.start
-    /*for (i <- 0 until Runtime.getRuntime.availableProcessors) {
-      val serverOutbound = new ServerActorBridge(server)
-      val client = new ClientActor(serverOutbound, dataManager)
-      client.start
-      serverOutbound.client = new ClientActorBridge(client)
-    }*/
-    ()
-  }
+object Client {
+    def main(args: Array[String]): Unit = {
+        val props = new Props(args(0))
+        val melder = Bridger.connect(props)
+        for (i <- 0 until props.processors) {
+            val client = new ClientActor(melder(), props.dataManager)
+            client.start
+            melder.connect(new ClientActorBridge(client))
+        }
+    }
 }
 
 import java.util.UUID
