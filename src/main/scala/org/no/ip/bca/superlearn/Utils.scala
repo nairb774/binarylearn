@@ -44,7 +44,7 @@ class Props(file: java.io.File) {
     
     def this(_file: String) = this(new java.io.File(_file))
     
-    lazy val props = {
+    val props = {
         val reader = new InputStreamReader(new BufferedInputStream(new FileInputStream(file)), "UTF-8")
         try {
             val props = new Properties
@@ -55,9 +55,21 @@ class Props(file: java.io.File) {
         }
     }
     
-    def serverPort = Integer.parseInt(props.getProperty("server.port"))
+    lazy val timeout = 1000 * 1000
     
-    def dataManager = {
+    lazy val serverHost = props.getProperty("server.host")
+    lazy val serverPort = Integer.parseInt(props.getProperty("server.port"))
+    lazy val bridgePort = Integer.parseInt(props.getProperty("bridge.port"))
+    lazy val processors = {
+        val prop = props.getProperty("processors")
+        if (prop == null) {
+            Runtime.getRuntime.availableProcessors
+        } else {
+            Integer.parseInt(prop)
+        }
+    }
+    
+    lazy val dataManager = {
         val dataFolder = new File(props.getProperty("data.folder"))
         val size = Integer.parseInt(props.getProperty("data.size"))
         val max = java.lang.Long.parseLong(props.getProperty("data.max"))
@@ -65,7 +77,7 @@ class Props(file: java.io.File) {
         new DataManager(dataFolder, size, max, spans)
     }
     
-    def matrix = {
+    lazy val matrix = {
         val location = new File(props.getProperty("matrix.location"))
         val w = Integer.parseInt(props.getProperty("matrix.w"))
         val h = Integer.parseInt(props.getProperty("matrix.h"))
