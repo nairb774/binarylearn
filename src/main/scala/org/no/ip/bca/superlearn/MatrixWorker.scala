@@ -17,6 +17,8 @@ class MatrixWorker(
     val w = this.matrix.w
     val h = this.matrix.h
     val transpose = this.transpose.m
+    val hiddenBias = this.matrix.hidden
+    val visibleBias = this.matrix.hidden
     
     val start = range.start
     val end = range.end
@@ -36,16 +38,16 @@ class MatrixWorker(
       if (random.nextDouble < sample) {
         if (_canceled) return null
         toBinaryDoubleArray(iter.next, v1)
-        mult(v1, matrix, w, h, random, h1)
-        mult(h1, transpose, h, w, random, v2)
-        mult(v2, matrix, w, h, random, h2)
+        mult(v1, matrix, w, h, hiddenBias, random, h1)
+        mult(h1, transpose, h, w, visibleBias, random, v2)
+        mult(v2, matrix, w, h, hiddenBias, random, h2)
         explode(v1, h1, v2, h2, m)
         count += 1
       } else {
         iter.skip
       }
     }
-    (Matrix(w, h, m), count)
+    (Matrix(w, h, m, /*TODO*/null, /*TODO*/null), count)
   }
 }
 

@@ -95,6 +95,6 @@ class Props(file: java.io.File) {
         }
         val m = new Array[Double](w * h)
         ByteBuffer.wrap(bytes).asDoubleBuffer.get(m)
-        Matrix(w, h, m)
+        Matrix(w, h, m, /*TODO*/null, /*TODO*/null)
     }
 }

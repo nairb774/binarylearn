@@ -1,5 +1,7 @@
 package org.no.ip.bca.superlearn;
 
+import static java.lang.Math.exp;
+
 class UtilMethods {
     /**
      * Given the various visible and invisible states compute the delta and add
@@ -51,8 +53,8 @@ class UtilMethods {
      * @param random
      * @param out
      */
-    public static void mult(final double[] v, final double[] m, final int w, final int h, final FastRandom random,
-            final double[] out) {
+    public static void mult(final double[] v, final double[] m, final int w, final int h, final double[] bias,
+            final FastRandom random, final double[] out) {
         assert w > 0;
         assert h > 0;
         assert v.length >= w;
@@ -65,7 +67,7 @@ class UtilMethods {
             for (int x = 0; x < w; x++) {
                 sum += v[x] * m[i++];
             }
-            out[y] = sum >= random.nextDouble() ? 1.0 : 0.0;
+            out[y] = 1.0 / (1.0 + exp(-sum - bias[y])) >= random.nextDouble() ? 1.0 : 0.0;
         }
     }
     
@@ -127,13 +129,10 @@ class UtilMethods {
         }
     }
     
-    public static double mult(final double[] a, final double s, final double[] b) {
-        double error = 0.0;
-        for(int i = 0; i < a.length; i++) {
-            double e = a[i] * s;
-            a[i] = e + b[i];
-            error += e * e;
+    public static double mult(final double[] a, final double normalization, final double[] b) {
+        for (int i = 0; i < a.length; i++) {
+            a[i] = a[i] * normalization + b[i];
         }
-        return error;
+        return 0.0;
     }
 }

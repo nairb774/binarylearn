@@ -19,9 +19,9 @@ import org.no.ip.bca.scala.Ranges
 import org.no.ip.bca.scala.utils.actor.ReActor
 
 object Matrix {
-    val EMPTY = Matrix(0, 0, Array())
+    val EMPTY = Matrix(0, 0, Array(), null, null)
 }
-case class Matrix(w: Int, h: Int, m: Array[Double])
+case class Matrix(w: Int, h: Int, m: Array[Double], hidden: Array[Double], visible: Array[Double])
 
 private object ClientActor {
   case class NewWork(matrix: Matrix, ranges: Ranges.Pair*)
@@ -91,7 +91,7 @@ class ClientActor(
       UtilMethods.transpose(m, w, h, t)
       
       this.matrix = matrix
-      this.transpose = Matrix(h, w, t)
+      this.transpose = Matrix(h, w, t, null, null)
       findWork
   }
   
@@ -123,15 +123,15 @@ class ClientActor(
   private def findWork = {
     if (availableRanges.isEmpty) {
       // Send matrix
-      if (nextMatrix == null) {
+      if (nextCount == 0) {
         outbound.sendMatrix(Matrix.EMPTY, 0)
       } else {
         outbound.sendMatrix(nextMatrix, nextCount)
-        matrix = null
-        transpose = null
-        nextMatrix = null
-        nextCount = 0
       }
+      matrix = null
+      transpose = null
+      nextMatrix = null
+      nextCount = 0
       to(awaitMatrixState)
     }
     val pickFrom = availableRanges & dataManager.ranges
