@@ -20,7 +20,7 @@ object Bridger {
     private def handleSocket(props: Props, melder: Melder, ssocket: ServerSocket): Unit = {
         val socket = ssocket.accept
         socket.setSoTimeout(props.timeout)
-        val out = new InvokeOut(new ObjectOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
+        val out = new InvokeOut(new DataOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
             override def handleException(e: Exception) = {
                 super.handleException(e)
                 exit()
@@ -29,7 +29,7 @@ object Bridger {
         out.start
         val clientOutbound = out.open[ClientOutbound](0)
         val serverOutbound = melder(clientOutbound)
-        val in = new InvokeIn(new ObjectInputStream(new BufferedInputStream(socket.getInputStream))) {
+        val in = new InvokeIn(new DataInputStream(new BufferedInputStream(socket.getInputStream))) {
             override def run = try {
                 super.run
             } finally {
@@ -47,7 +47,7 @@ object Bridger {
         val port = props.serverPort
         val socket = new Socket(host, port)
         socket.setSoTimeout(props.timeout)
-        val out = new InvokeOut(new ObjectOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
+        val out = new InvokeOut(new DataOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
             override def handleException(e: Exception) = {
                 super.handleException(e)
                 exit()
@@ -57,7 +57,7 @@ object Bridger {
         val serverOutbound = out.open[ServerOutbound](0)
         val bridge = ActiveProxy[Bridge](new BridgeImpl(serverOutbound))
         val bridgeClientOutbound = ActiveProxy[BridgeClientOutbound](new BridgeClientOutboundImpl(dataManager))
-        val in = new InvokeIn(new ObjectInputStream(new BufferedInputStream(socket.getInputStream))) {
+        val in = new InvokeIn(new DataInputStream(new BufferedInputStream(socket.getInputStream))) {
             override def run = try {
                 super.run
             } finally {

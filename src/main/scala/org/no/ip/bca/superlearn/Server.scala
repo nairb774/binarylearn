@@ -21,7 +21,7 @@ object Server {
     private def handleSocket(props: Props, server: ServerActor, ssocket: ServerSocket): Unit = {
         val socket = ssocket.accept
         socket.setSoTimeout(props.timeout)
-        val out = new InvokeOut(new ObjectOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
+        val out = new InvokeOut(new DataOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
             override def handleException(e: Exception) = {
                 super.handleException(e)
                 exit()
@@ -29,7 +29,7 @@ object Server {
         }
         out.start
         val bridge = new ServerActorBridge(server, out.open[ClientOutbound](0))
-        val in = new InvokeIn(new ObjectInputStream(new BufferedInputStream(socket.getInputStream))) {
+        val in = new InvokeIn(new DataInputStream(new BufferedInputStream(socket.getInputStream))) {
             override def run = try {
                 super.run
             } finally {
