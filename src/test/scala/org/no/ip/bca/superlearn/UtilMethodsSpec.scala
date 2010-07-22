@@ -31,8 +31,35 @@ class UtilMethodsTest extends SpecificationWithJUnit {
     }
   }
   
+  "mult" should {
+      "" >> {
+          val v = Array(1.0, 2.0)
+          val m = Array(2.0, 4.0,
+                        3.0,-1.0,
+                        9.0,-5.0)
+          val out = new Array[Double](3)
+          UtilMethods.mult(v, m, 2, 3, new FastRandom, out)
+          out must matchArray(Array(1.0, 1.0, 0.0))
+      }
+  }
+  
+  "explode" should {
+      "work" >> {
+          val v1 = Array(1.0, 2.0, 3.0)
+          val h1 = Array(3.0, 4.0)
+          val v2 = Array(2.0, 6.0, 1.0)
+          val h2 = Array(7.0, 8.0)
+          val out = new Array[Double](7)
+          UtilMethods.explode(v1, h1, v2, h2, out)
+          out must matchArray(Array(-11.0, -36.0, 2.0, -12.0, -40.0, 4.0, 1.0))
+      }
+  }
+  
   case class matchArray(a: Array[Double]) extends matcher.Matcher[Array[Double]] {
     import java.util.Arrays
-    def apply(v: => Array[Double]) = (Arrays.equals(v, a), "okMessage", "koMessage")
+    def apply(v: => Array[Double]) = {
+        val _v = v()
+        (Arrays.equals(_v, a), "okMessage", Arrays.toString(_v))
+    }
   }
 }
