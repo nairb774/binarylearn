@@ -49,9 +49,9 @@ class UtilMethodsTest extends SpecificationWithJUnit {
           val h1 = Array(3.0, 4.0)
           val v2 = Array(2.0, 6.0, 1.0)
           val h2 = Array(7.0, 8.0)
-          val out = new Array[Double](7)
+          val out = new Array[Double](6)
           UtilMethods.explode(v1, h1, v2, h2, out)
-          out must matchArray(Array(-11.0, -36.0, 2.0, -12.0, -40.0, 4.0, 1.0))
+          out must matchArray(Array(-11.0, -36.0, 2.0, -12.0, -40.0, 4.0))
       }
   }
   

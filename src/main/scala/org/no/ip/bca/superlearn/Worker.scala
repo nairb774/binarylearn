@@ -18,13 +18,16 @@ import java.util.concurrent.RunnableFuture
 import org.no.ip.bca.scala.Ranges
 import org.no.ip.bca.scala.utils.actor.ReActor
 
+object Matrix {
+    val EMPTY = Matrix(0, 0, Array())
+}
 case class Matrix(w: Int, h: Int, m: Array[Double])
 
 private object ClientActor {
   case class NewWork(matrix: Matrix, ranges: Ranges.Pair*)
   case class Assigned(id: UUID, range: Ranges.Pair)
   case class Data(point: Long, data: Array[Byte])
-  case class Finished(future: RunnableFuture[Matrix])
+  case class Finished(future: RunnableFuture[(Matrix, Long)])
 }
 
 class ClientActorBridge(client: ClientActor) extends ClientOutbound {
@@ -52,10 +55,11 @@ class ClientActor(
   private var availableRanges = Ranges.empty
   private var matrix: Matrix = null
   private var transpose: Matrix = null
-  private var nextMatrix: Array[Double] = null
+  private var nextMatrix: Matrix = null
+  private var nextCount: Long = 0
   
   private var workingRange: Ranges.Pair = null
-  private var work: RunnableFuture[Matrix] = null
+  private var work: RunnableFuture[(Matrix, Long)] = null
   
   override def to(f: PF) = {
     reAct = f
@@ -120,14 +124,13 @@ class ClientActor(
     if (availableRanges.isEmpty) {
       // Send matrix
       if (nextMatrix == null) {
-        outbound.sendMatrix(Matrix(0, 0, Array()), 0)
+        outbound.sendMatrix(Matrix.EMPTY, 0)
       } else {
-        val m = new Array[Double](nextMatrix.length - 1)
-        System.arraycopy(nextMatrix, 0, m, 0, m.length)
-        outbound.sendMatrix(Matrix(matrix.w, matrix.h, m), nextMatrix(m.length).toLong)
+        outbound.sendMatrix(nextMatrix, nextCount)
         matrix = null
         transpose = null
         nextMatrix = null
+        nextCount = 0
       }
       to(awaitMatrixState)
     }
@@ -155,12 +158,13 @@ class ClientActor(
   }
   
   private def commit = {
-    val m = work.get.m
+    val (matrix, count) = work.get
     if (nextMatrix == null) {
-      nextMatrix = m.clone
+      nextMatrix = matrix
     } else {
-      UtilMethods.sum(m, nextMatrix)
+      UtilMethods.sum(matrix.m, nextMatrix.m)
     }
+    nextCount += count
     findWork
   }
   

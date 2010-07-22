@@ -30,7 +30,6 @@ class UtilMethods {
                 m[i++] += v1[x] * h1[y] - v2[x] * h2[y];
             }
         }
-        m[i] += 1.0; // Counter
     }
     
     /**

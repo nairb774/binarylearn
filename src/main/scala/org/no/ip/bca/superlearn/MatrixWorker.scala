@@ -7,12 +7,12 @@ class MatrixWorker(
     matrix: Matrix,
     transpose: Matrix,
     range: Ranges.Pair,
-    dataManager: DataManager) extends java.util.concurrent.Callable[Matrix] {
+    dataManager: DataManager) extends java.util.concurrent.Callable[(Matrix, Long)] {
   @volatile
   private var _canceled = false
   def cancel = _canceled = true
   
-  def call: Matrix = {
+  def call: (Matrix, Long) = {
     val matrix = this.matrix.m
     val w = this.matrix.w
     val h = this.matrix.h
@@ -28,9 +28,10 @@ class MatrixWorker(
     val v2 = new Array[Double](w)
     val h2 = new Array[Double](h)
     
-    val m = new Array[Double](w * h + 1) // +1 for counter
+    val m = new Array[Double](w * h)
     
     val iter = dataManager.iter(start, end)
+    var count: Long = 0
     while (iter.hasNext) {
       if (random.nextDouble < sample) {
         if (_canceled) return null
@@ -39,11 +40,12 @@ class MatrixWorker(
         mult(h1, transpose, h, w, random, v2)
         mult(v2, matrix, w, h, random, h2)
         explode(v1, h1, v2, h2, m)
+        count += 1
       } else {
         iter.skip
       }
     }
-    Matrix(w, h, m)
+    (Matrix(w, h, m), count)
   }
 }
 
