@@ -34,11 +34,11 @@ private class ActiveProxy[T <: AnyRef](obj: T) extends InvocationHandler with Re
     private case class I(method: Method, args: Array[AnyRef])
     def invoke(proxy: AnyRef, method: Method, args: Array[AnyRef]): AnyRef = {
       method.getName match {
-        case "equals" =>
+        case "equals" if args.length == 1 =>
           (this == args(0)).asInstanceOf[AnyRef]
-        case "hashCode" =>
+        case "hashCode" if args.length == 0 =>
           (this.hashCode).asInstanceOf[AnyRef]
-        case "toString" =>
+        case "toString" if args.length == 0 =>
           this.toString
         case _ =>
           this ! I(method, args)
@@ -67,11 +67,11 @@ class InvokeOut(out: ObjectOutputStream) extends ReActor {
     
     def invoke(proxy: AnyRef, method: Method, args: Array[AnyRef]): AnyRef = {
       method.getName match {
-        case "equals" =>
+        case "equals" if args.length == 1 =>
           (this == args(0)).asInstanceOf[AnyRef]
-        case "hashCode" =>
+        case "hashCode" if args.length == 0 =>
           (this.hashCode).asInstanceOf[AnyRef]
-        case "toString" =>
+        case "toString" if args.length == 0 =>
           this.toString
         case _ =>
           InvokeOut.this ! Invoke(id, getSig(method), args)
