@@ -31,7 +31,7 @@ class UtilMethodsTest extends SpecificationWithJUnit {
     }
   }
   
-  "mult" should {
+  /*"mult" should {
       "" >> {
           val v = Array(1.0, 2.0)
           val m = Array(2.0, 4.0,
@@ -41,7 +41,7 @@ class UtilMethodsTest extends SpecificationWithJUnit {
           UtilMethods.mult(v, m, 2, 3, new FastRandom, out)
           out must matchArray(Array(1.0, 1.0, 0.0))
       }
-  }
+  }*/
   
   "explode" should {
       "work" >> {

@@ -18,28 +18,44 @@ import java.util.concurrent.RunnableFuture
 import org.no.ip.bca.scala.Ranges
 import org.no.ip.bca.scala.utils.actor.ReActor
 
-object Matrix {
-    val EMPTY = Matrix(0, 0, Array(), null, null)
+case class State(weights: Array[Double], hidden: Array[Double], visible: Array[Double]) {
+    def w = visible.length
+    def h = hidden.length
+    def transposedWeights = {
+        val t = new Array[Double](weights.length)
+        UtilMethods.transpose(weights, w, h, t)
+        t
+    }
 }
-case class Matrix(w: Int, h: Int, m: Array[Double], hidden: Array[Double], visible: Array[Double])
+
+case class Compute(cd: Array[Double], v0act: Array[Long], h0Act: Array[Long], v1act: Array[Long], h1act: Array[Long], count: Long) {
+    def +(c: Compute) = {
+        val newCd = UtilMethods.sum(cd, c.cd, new Array[Double](cd.length))
+        val newV0act = UtilMethods.sum(v0act, c.v0act, new Array[Long](v0act.length))
+        val newH0Act = UtilMethods.sum(h0Act, c.h0Act, new Array[Long](h0Act.length))
+        val newV1act = UtilMethods.sum(v1act, c.v1act, new Array[Long](v1act.length))
+        val newH1act = UtilMethods.sum(h1act, c.h1act, new Array[Long](h1act.length))
+        Compute(newCd, newV0act, newH0Act, newV1act, newH1act, count + c.count)
+    }
+}
 
 private object ClientActor {
-  case class NewWork(matrix: Matrix, ranges: Ranges.Pair*)
+  case class NewWork(state: State, ranges: Ranges.Pair*)
   case class Assigned(id: UUID, range: Ranges.Pair)
   case class Data(point: Long, data: Array[Byte])
-  case class Finished(future: RunnableFuture[(Matrix, Long)])
+  case class Finished(future: RunnableFuture[Compute])
 }
 
 class ClientActorBridge(client: ClientActor) extends ClientOutbound {
   import ClientActor._
   def assigned(id: UUID, range: Ranges.Pair) = client ! Assigned(id, range)
   def sendData(point: Long, data: Array[Byte]) = client ! Data(point, data)
-  def newWork(matrix: Matrix, ranges: Ranges.Pair*) = client ! NewWork(matrix, ranges: _*)
+  def newWork(state: State, ranges: Ranges.Pair*) = client ! NewWork(state, ranges: _*)
 }
 
 trait ServerOutbound {
   def requestPoint(point: Long): Unit
-  def sendMatrix(matrix: Matrix, count: Long): Unit
+  def sendCompute(compute: Compute): Unit
   def request(id: UUID, range: Ranges.Pair): Unit
 }
 
@@ -53,13 +69,13 @@ class ClientActor(
   private val random = new FastRandom
   
   private var availableRanges = Ranges.empty
-  private var matrix: Matrix = null
-  private var transpose: Matrix = null
-  private var nextMatrix: Matrix = null
-  private var nextCount: Long = 0
+  private var state: State = null
+  private var transposedWeights: Array[Double] = null
+  
+  private var compute: Compute = null
   
   private var workingRange: Ranges.Pair = null
-  private var work: RunnableFuture[(Matrix, Long)] = null
+  private var work: RunnableFuture[Compute] = null
   
   override def to(f: PF) = {
     reAct = f
@@ -82,16 +98,10 @@ class ClientActor(
       otherAssigned
   
   private def awaitMatrixState: PF = {
-    case NewWork(matrix, ranges) =>
+    case NewWork(state, ranges) =>
+      this.state = state
+      this.transposedWeights = state.transposedWeights
       availableRanges = Ranges(ranges)
-      val m = matrix.m
-      val t = new Array[Double](m.length)
-      val w = matrix.w
-      val h = matrix.h
-      UtilMethods.transpose(m, w, h, t)
-      
-      this.matrix = matrix
-      this.transpose = Matrix(h, w, t, null, null)
       findWork
   }
   
@@ -123,15 +133,12 @@ class ClientActor(
   private def findWork = {
     if (availableRanges.isEmpty) {
       // Send matrix
-      if (nextCount == 0) {
-        outbound.sendMatrix(Matrix.EMPTY, 0)
-      } else {
-        outbound.sendMatrix(nextMatrix, nextCount)
-      }
-      matrix = null
-      transpose = null
-      nextMatrix = null
-      nextCount = 0
+      outbound.sendCompute(compute)
+      state = null
+      transposedWeights = null
+      
+      compute = null
+      
       to(awaitMatrixState)
     }
     val pickFrom = availableRanges & dataManager.ranges
@@ -145,7 +152,7 @@ class ClientActor(
       // Pick
       workingRange = pickFrom.head.withMaxLength(10240)
       // Start work
-      val worker = new MatrixWorker(matrix, transpose, workingRange, dataManager)
+      val worker = new MatrixWorker(state, transposedWeights, workingRange, dataManager)
       work = new MatrixWorkerFuture(worker, future => this ! Finished(future))
       val thread = new Thread(work)
       thread.setDaemon(true)
@@ -158,13 +165,12 @@ class ClientActor(
   }
   
   private def commit = {
-    val (matrix, count) = work.get
-    if (nextMatrix == null) {
-      nextMatrix = matrix
+    val compute = work.get
+    if (this.compute == null) {
+      this.compute = compute
     } else {
-      UtilMethods.sum(matrix.m, nextMatrix.m)
+      this.compute += compute
     }
-    nextCount += count
     findWork
   }
   

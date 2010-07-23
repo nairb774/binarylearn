@@ -123,16 +123,32 @@ class UtilMethods {
         }
     }
     
-    public static void sum(final double[] a, final double[] b) {
-        for(int i = 0; i < a.length; i++) {
-            b[i] += a[i];
+    public static double[] sum(final double[] a, final double[] b, final double[] c) {
+        for (int i = 0; i < a.length; i++) {
+            c[i] = a[i] + b[i];
         }
+        return c;
     }
     
-    public static double mult(final double[] a, final double normalization, final double[] b) {
+    public static long[] sum(final double[] a, final long[] b, final long[] c) {
         for (int i = 0; i < a.length; i++) {
-            a[i] = a[i] * normalization + b[i];
+            c[i] = ((long) a[i]) + b[i];
         }
-        return 0.0;
+        return c;
+    }
+    
+    public static long[] sum(final long[] a, final long[] b, final long[] c) {
+        for (int i = 0; i < a.length; i++) {
+            c[i] = a[i] + b[i];
+        }
+        return c;
+    }
+    
+    public static void applyContrastiveDivergence(double momentum, double[] momentums, double epsilon, double[] cd,
+            long count, double weight, double[] weights, double[] newMomentums, double[] newWeights) {
+        for (int i = 0; i < cd.length; i++) {
+            newMomentums[i] = momentum * momentums[i] + epsilon * (cd[i] / count - weight * weights[i]);
+            newWeights[i] = weights[i] + newMomentums[i];
+        }
     }
 }

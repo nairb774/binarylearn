@@ -82,7 +82,7 @@ class Props(file: java.io.File) {
         new MatrixRecorder(folder)
     }
     
-    lazy val matrix = {
+    lazy val state = {
         val location = new File(props.getProperty("matrix.location"))
         val w = Integer.parseInt(props.getProperty("matrix.w"))
         val h = Integer.parseInt(props.getProperty("matrix.h"))
@@ -95,6 +95,6 @@ class Props(file: java.io.File) {
         }
         val m = new Array[Double](w * h)
         ByteBuffer.wrap(bytes).asDoubleBuffer.get(m)
-        Matrix(w, h, m, /*TODO*/null, /*TODO*/null)
+        null: ServerState //Matrix(w, h, m, /*TODO*/null, /*TODO*/null)
     }
 }

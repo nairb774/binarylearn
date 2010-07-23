@@ -4,50 +4,58 @@ import org.no.ip.bca.scala.Ranges
 import UtilMethods._
 
 class MatrixWorker(
-    matrix: Matrix,
-    transpose: Matrix,
+    state: State,
+    transposedWeights: Array[Double],
     range: Ranges.Pair,
-    dataManager: DataManager) extends java.util.concurrent.Callable[(Matrix, Long)] {
+    dataManager: DataManager) extends java.util.concurrent.Callable[Compute] {
   @volatile
   private var _canceled = false
   def cancel = _canceled = true
   
-  def call: (Matrix, Long) = {
-    val matrix = this.matrix.m
-    val w = this.matrix.w
-    val h = this.matrix.h
-    val transpose = this.transpose.m
-    val hiddenBias = this.matrix.hidden
-    val visibleBias = this.matrix.hidden
+  def call: Compute = {
+    val weights = state.weights
+    val w = state.w
+    val h = state.h
+    val transposedWeights = this.transposedWeights
+    val hiddenBias = state.hidden
+    val visibleBias = state.hidden
     
     val start = range.start
     val end = range.end
     val random = new FastRandom
     val sample = 0.05
     
+    val v0 = new Array[Double](w)
+    val h0 = new Array[Double](h)
     val v1 = new Array[Double](w)
     val h1 = new Array[Double](h)
-    val v2 = new Array[Double](w)
-    val h2 = new Array[Double](h)
     
-    val m = new Array[Double](w * h)
+    val cd = new Array[Double](w * h)
     
     val iter = dataManager.iter(start, end)
+    val v0act = new Array[Long](w)
+    val h0act = new Array[Long](h)
+    val v1act = new Array[Long](w)
+    val h1act = new Array[Long](h)
     var count: Long = 0
     while (iter.hasNext) {
       if (random.nextDouble < sample) {
         if (_canceled) return null
-        toBinaryDoubleArray(iter.next, v1)
-        mult(v1, matrix, w, h, hiddenBias, random, h1)
-        mult(h1, transpose, h, w, visibleBias, random, v2)
-        mult(v2, matrix, w, h, hiddenBias, random, h2)
-        explode(v1, h1, v2, h2, m)
+        toBinaryDoubleArray(iter.next, v0)
+        mult(v0, weights, w, h, hiddenBias, random, h0)
+        mult(h0, transposedWeights, h, w, visibleBias, random, v1)
+        mult(v1, weights, w, h, hiddenBias, random, h1)
+        explode(v0, h0, v1, h1, cd)
+        sum(v0, v0act, v0act)
+        sum(h0, h0act, h0act)
+        sum(v1, v1act, v1act)
+        sum(h1, h1act, h1act)
         count += 1
       } else {
         iter.skip
       }
     }
-    (Matrix(w, h, m, /*TODO*/null, /*TODO*/null), count)
+    Compute(cd, v0act, h0act, v1act, h0act, count)
   }
 }
 

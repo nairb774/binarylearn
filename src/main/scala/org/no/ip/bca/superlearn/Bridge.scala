@@ -94,18 +94,18 @@ trait BridgeClientOutbound extends ClientOutbound {
 
 class BridgeClientOutboundImpl(dataManager: DataManager) extends BridgeClientOutbound {
     private var clients = Set.empty[ClientOutbound]
-    private var matrix: Matrix = null
+    private var state: State = null
     private var ranges = Ranges.empty
     def connect(client: ClientOutbound): Unit = {
         clients += client
-        if (matrix != null) {
-            client.newWork(matrix, ranges.parts: _*)
+        if (state != null) {
+            client.newWork(state, ranges.parts: _*)
         }
     }
-    def newWork(matrix: Matrix, ranges: Ranges.Pair*): Unit = {
-        this.matrix = matrix
+    def newWork(state: State, ranges: Ranges.Pair*): Unit = {
+        this.state = state
         this.ranges = Ranges(ranges: _*)
-        clients foreach { _.newWork(matrix, ranges: _*) }
+        clients foreach { _.newWork(state, ranges: _*) }
     }
     def sendData(point: Long, data: Array[Byte]): Unit = {
         dataManager.write(point, data)
@@ -125,7 +125,7 @@ class SmartServerOutbound(parent: ServerOutbound, dataManager: DataManager, clie
             parent.requestPoint(point)
         }
     }
-    def sendMatrix(matrix: Matrix, count: Long) = parent.sendMatrix(matrix, count)
+    def sendCompute(compute: Compute) = parent.sendCompute(compute)
     def request(id: UUID, range: Ranges.Pair) = parent.request(id, range)
 }
 
@@ -133,40 +133,40 @@ class BridgeServerOutbound(bridge: Bridge, parent: ServerOutbound) extends Serve
     bridge.connect(this)
     
     def requestPoint(point: Long): Unit = parent.requestPoint(point)
-    def sendMatrix(matrix: Matrix, count: Long) = bridge.sendMatrix(matrix, count, this)
+    def sendCompute(compute: Compute) = bridge.sendCompute(compute)
     def request(id: UUID, range: Ranges.Pair) = parent.request(id, range)
 }
 
 trait Bridge {
     def connect(server: ServerOutbound): Unit
-    def sendMatrix(matrix: Matrix, count: Long, server: ServerOutbound): Unit
+    def sendCompute(compute: Compute): Unit
 }
 
 class BridgeImpl(parent: ServerOutbound) extends Bridge {
     private var servers = Set.empty[ServerOutbound]
     private var checkedIn = 0
-    private var nextMatrix: Matrix = null
-    private var count: Long = 0
+    private var compute: Compute = null
     
     def connect(server: ServerOutbound) = {
         servers += server
     }
-    def sendMatrix(matrix: Matrix, count: Long, server: ServerOutbound) = {
+    def sendCompute(compute: Compute) = {
         checkedIn += 1
         
-        if (count > 0) {
-            if (nextMatrix == null) {
-                nextMatrix = matrix
+        if (compute != null) {
+            if (this.compute == null) {
+                this.compute = compute
             } else {
-                UtilMethods.sum(matrix.m, nextMatrix.m)
+                this.compute += compute
             }
-            this.count += count
         }
-        
+        check
+    }
+    
+    def check = {
         if (servers.size == checkedIn) {
-            parent.sendMatrix(nextMatrix, this.count)
-            nextMatrix = null
-            this.count = 0
+            parent.sendCompute(compute)
+            compute = null
             checkedIn = 0
         }
     }

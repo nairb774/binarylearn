@@ -13,7 +13,7 @@ object Server {
         val props = new Props(args(0))
         val port = props.serverPort
         val ssocket = new ServerSocket(port)
-        val server = new ServerActor(props.dataManager, props.matrixRecorder, props.matrix)
+        val server = new ServerActor(props.dataManager, props.matrixRecorder, props.state)
         server.start
         handleSocket(props, server, ssocket)
     }
@@ -42,15 +42,17 @@ object Server {
     }
 }
 
+case class ServerState(state: State, epsilon: Double, momentum: Double, momentums: Array[Double], weightcost: Double)
+
 private object ServerActor {
   case class Connect(client: ClientOutbound)
   case class RequestPoint(point: Long, client: ClientOutbound)
-  case class RecieveMatrix(matrix: Matrix, count: Long, client: ClientOutbound)
+  case class RecieveCompute(compute: Compute, client: ClientOutbound)
   case class Request(id: UUID, range: Ranges.Pair, client: ClientOutbound)
 }
 
 trait ClientOutbound {
-  def newWork(matrix: Matrix, ranges: Ranges.Pair*): Unit
+  def newWork(state: State, ranges: Ranges.Pair*): Unit
   def sendData(point: Long, data: Array[Byte]): Unit
   def assigned(id: UUID, range: Ranges.Pair): Unit
 }
@@ -60,14 +62,14 @@ class ServerActorBridge(server: ServerActor, private var _client: ClientOutbound
   server ! Connect(_client)
   
   def request(id: UUID, range: Ranges.Pair) = server ! Request(id, range, _client)
-  def sendMatrix(matrix: Matrix, count: Long) = server ! RecieveMatrix(matrix, count, _client)
+  def sendCompute(compute: Compute) = server ! RecieveCompute(compute, _client)
   def requestPoint(point: Long) = server ! RequestPoint(point, _client)
 }
 
 class ServerActor(
     dataManager: DataManager,
     matrixRecorder: MatrixRecorder,
-    private var currentMatrix: Matrix
+    private var serverState: ServerState
     ) extends ReActor {
   import ServerActor._
   private class ClientState {
@@ -78,28 +80,25 @@ class ServerActor(
   private var clients = Map.empty[ClientOutbound, ClientState]
   
   private var outstanding = dataManager.ranges
-  private var inProgress: Matrix = null
-  private var count: Long = 0
+  private var compute: Compute = null
   private val slope = 0.99
   
   val reAct: PF = {
     case Connect(client) =>
       clients += client -> new ClientState()
-      client.newWork(currentMatrix, outstanding.parts: _*)
+      client.newWork(serverState.state, outstanding.parts: _*)
     case RequestPoint(point, client) =>
       client.sendData(point, dataManager.read(point))
-    case RecieveMatrix(matrix, _count, client) =>
+    case RecieveCompute(compute, client) =>
       // Mark off client
       clients(client).done = true
       // Merge matrix
-      if (_count > 0) {
-        if (inProgress == null) {
-          inProgress = matrix
+      if (compute != null) {
+        if (this.compute == null) {
+          this.compute = compute
         } else {
-          UtilMethods.sum(matrix.m, inProgress.m)
+          this.compute += compute
         }
-        // Store count
-        count += _count
       }
       // Check for next round
       if (outstanding.isEmpty && clients.values.find(!_.done).isEmpty) {
@@ -114,15 +113,30 @@ class ServerActor(
   }
   
   private def shift = {
-    val error = UtilMethods.mult(inProgress.m, slope / count.toDouble, currentMatrix.m)
-    currentMatrix = inProgress
-    matrixRecorder.record(currentMatrix, error)
-    inProgress = null
-    count = 0
+    val newMomentums = new Array[Double](serverState.momentums.length)
+    val newWeights = new Array[Double](newMomentums.length)
+    val newHiddenBias = new Array[Double](0)
+    val newVisibleBias = new Array[Double](0)
+    UtilMethods.applyContrastiveDivergence(
+            serverState.momentum,
+            serverState.momentums,
+            serverState.epsilon,
+            compute.cd,
+            compute.count,
+            serverState.weightcost,
+            serverState.state.weights,
+            newMomentums,
+            newWeights
+        )
+    // TODO: Adjust bias
+    val newState = State(newWeights, newHiddenBias, newVisibleBias)
+    serverState = ServerState(newState, serverState.epsilon, serverState.momentum, newMomentums, serverState.weightcost)
+    matrixRecorder.record(serverState, 0.0)
+    compute = null
     outstanding = dataManager.ranges
     val parts = outstanding.parts
     clients foreach { case (client, state) =>
-      client.newWork(currentMatrix, outstanding.parts: _*)
+      client.newWork(newState, outstanding.parts: _*)
       state.done = false
       state.assigned = Ranges.empty
     }

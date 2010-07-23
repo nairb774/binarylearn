@@ -2,25 +2,25 @@ package org.no.ip.bca.superlearn
 
 import java.io._
 import java.nio._
-import java.security.MessageDigest
-import java.util.UUID
+import java.security._
+import java.util._
 
 import scala.actors.Actor.actor
 
 import org.no.ip.bca.scala.Ranges
 
 class MatrixRecorder(dir: File) {
-    def record(matrix: Matrix, error: Double) = {
+    def record(serverState: ServerState, error: Double) = {
         val when = System.currentTimeMillis
         println(when + " " + error)
         actor {
-            val bytes = new Array[Byte](matrix.w * matrix.h * 8 + 8)
-            ByteBuffer.wrap(bytes).asDoubleBuffer.put(matrix.m).put(error)
-            val digest = MessageDigest.getInstance("SHA1").digest(bytes)
-            val out = new BufferedOutputStream(new FileOutputStream(new File(dir, when.toString)))
+            val digest = MessageDigest.getInstance("SHA1")
+            val out = new ObjectOutputStream(new BufferedOutputStream(new DigestOutputStream(
+                    new FileOutputStream(new File(dir, when.toString)), digest)))
             try {
-                out.write(bytes)
-                out.write(digest)
+                out.writeObject(serverState)
+                out.writeDouble(error)
+                out.write(digest.digest)
             } finally {
                 out.close
             }
