@@ -26,10 +26,16 @@ class Visualize(dir: File, w: Int, h: Int, outDir: File) {
     }
     
     def makeDiffs = {
-        dir.listFiles.toList.sort(_.getName < _.getName) reduceLeft { (a, b) =>
+        dir.listFiles.sortWith(_.getName < _.getName) reduceLeft { (a, b) =>
             val matrix = loadMatrix(a)
             FastCode.sub(loadMatrix(b), matrix)
             ImageIO.write(makeTopo(matrix), "png", new File(outDir, a.getName() + ".diff.png"))
+            val pw = new PrintWriter(new File(outDir, a.getName() + ".diff.txt"))
+            try {
+                FastCode.toString(matrix, w, h, pw)
+            } finally {
+                pw.close
+            }
             b
         }
     }
@@ -38,6 +44,7 @@ class Visualize(dir: File, w: Int, h: Int, outDir: File) {
         val minmax = FastCode.minmax(matrix)
         val min = minmax(0)
         val spread = minmax(1) - min
+        println(min + " " + minmax(1) + " " + spread)
         val rgb = for (pt <- matrix) yield HSBtoRGB(((pt - min) / spread).toFloat, 1.0f, 1.0f)
         val image = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
         image.setRGB(0, 0, w, h, rgb, 0, w)
