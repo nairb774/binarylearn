@@ -28,14 +28,12 @@ case class State(weights: Array[Double], hidden: Array[Double], visible: Array[D
     }
 }
 
-case class Compute(cd: Array[Double], v0act: Array[Long], h0Act: Array[Long], v1act: Array[Long], h1act: Array[Long], count: Long) {
+case class Compute(cd: Array[Double], vAct: Array[Long], hAct: Array[Long], count: Long) {
     def +(c: Compute) = {
         val newCd = UtilMethods.sum(cd, c.cd, new Array[Double](cd.length))
-        val newV0act = UtilMethods.sum(v0act, c.v0act, new Array[Long](v0act.length))
-        val newH0Act = UtilMethods.sum(h0Act, c.h0Act, new Array[Long](h0Act.length))
-        val newV1act = UtilMethods.sum(v1act, c.v1act, new Array[Long](v1act.length))
-        val newH1act = UtilMethods.sum(h1act, c.h1act, new Array[Long](h1act.length))
-        Compute(newCd, newV0act, newH0Act, newV1act, newH1act, count + c.count)
+        val newVAct = UtilMethods.sum(vAct, c.vAct, new Array[Long](vAct.length))
+        val newHAct = UtilMethods.sum(hAct, c.hAct, new Array[Long](hAct.length))
+        Compute(newCd, newVAct, newHAct, count + c.count)
     }
 }
 
