@@ -6,6 +6,8 @@ import java.io._
 import java.nio._
 import javax.imageio.ImageIO
 
+import org.no.ip.bca.superlearn._
+
 object Visualize {
     def main(args: Array[String]): Unit = {
         val dir = new File(args(0))
@@ -14,18 +16,19 @@ object Visualize {
         val outDir = new File(args(3))
         val v = new Visualize(dir, w, h, outDir)
         v.writeTopo
-        v.makeDiffs
+        //v.makeDiffs
     }
 }
 
 class Visualize(dir: File, w: Int, h: Int, outDir: File) {
     def writeTopo = {
-        for (matrixFile <- dir.listFiles) {
-            ImageIO.write(makeTopo(loadMatrix(matrixFile)), "png", new File(outDir, matrixFile.getName() + ".topo.png"))
+        for (matrixFile <- dir.listFiles.sortWith(_.getName < _.getName)) {
+            val topoImage = makeTopo(loadMatrix(matrixFile))
+            //ImageIO.write(topoImage, "png", new File(outDir, matrixFile.getName() + ".topo.png"))
         }
     }
     
-    def makeDiffs = {
+    /*def makeDiffs = {
         dir.listFiles.sortWith(_.getName < _.getName) reduceLeft { (a, b) =>
             val matrix = loadMatrix(a)
             FastCode.sub(loadMatrix(b), matrix)
@@ -38,29 +41,28 @@ class Visualize(dir: File, w: Int, h: Int, outDir: File) {
             }
             b
         }
-    }
+    }*/
     
-    def makeTopo(matrix: Array[Double]) = {
-        val minmax = FastCode.minmax(matrix)
+    def makeTopo(state: State) = {
+        val minmax = FastCode.minmax(state.weights)
+        val minmaxV = FastCode.minmax(state.visible)
+        val minmaxH = FastCode.minmax(state.hidden)
         val min = minmax(0)
         val spread = minmax(1) - min
-        println(min + " " + minmax(1) + " " + spread)
-        val rgb = for (pt <- matrix) yield HSBtoRGB(((pt - min) / spread).toFloat, 1.0f, 1.0f)
+        println(List(min, minmax(1), spread, minmaxV(0), minmaxV(1), minmaxV(1) - minmaxV(0), minmaxH(0), minmaxH(1), minmaxH(1) - minmaxH(0)) mkString " ")
+        /*val rgb = for (pt <- state.weights) yield HSBtoRGB(((pt - min) / spread).toFloat, 1.0f, 1.0f)
         val image = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
         image.setRGB(0, 0, w, h, rgb, 0, w)
-        image
+        image*/
     }
     
-    def loadMatrix(file: File): Array[Double] = {
-        val bytes = new Array[Byte](w * h * 8)
-        val in = new DataInputStream(new FileInputStream(file))
-        try {
-            in.readFully(bytes)
+    def loadMatrix(file: File) = {
+        val in = new ObjectInputStream(new BufferedInputStream(new FileInputStream(file)))
+        val ss = try {
+            in.readObject.asInstanceOf[ServerState]
         } finally {
             in.close
         }
-        val pts = new Array[Double](w * h)
-        ByteBuffer.wrap(bytes).asDoubleBuffer.get(pts)
-        pts
+        ss.state
     }
 }

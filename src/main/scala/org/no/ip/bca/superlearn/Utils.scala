@@ -22,18 +22,22 @@ object MatrixWriter {
     import java.util._
     def main(args: Array[String]): Unit = {
         val random = new FastRandom
-        val len = Integer.parseInt(args(0))
-        val m = new Array[Double](len)
+        val props = new Props(args(0))
+        val w = props.w
+        val h = props.h
+        val len = w * h
+        val weights = new Array[Double](len)
+        val visible = new Array[Double](w)
+        val hidden = new Array[Double](h)
         var i = 0
         while (i < len) {
-            m(i) = random.nextDouble
+            weights(i) = 0.01 * random.nextDouble - 0.005
             i += 1
         }
-        val bytes = new Array[Byte](len * 8)
-        ByteBuffer.wrap(bytes).asDoubleBuffer.put(m)
-        val out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(args(1))))
-        out.write(bytes)
-        out.close
+        val state = State(weights, hidden, visible, 0.05, 1)
+        val momentum = Momentum(new Array(len), new Array(w), new Array(h))
+        val ss = ServerState(state, momentum)
+        props.matrixRecorder.record(ss, 0.0)
     }
 }
 
@@ -82,19 +86,16 @@ class Props(file: java.io.File) {
         new MatrixRecorder(folder)
     }
     
+    lazy val w = Integer.parseInt(props.getProperty("matrix.w"))
+    lazy val h = Integer.parseInt(props.getProperty("matrix.h"))
+    
     lazy val state = {
         val location = new File(props.getProperty("matrix.location"))
-        val w = Integer.parseInt(props.getProperty("matrix.w"))
-        val h = Integer.parseInt(props.getProperty("matrix.h"))
-        val bytes = new Array[Byte](w * h * 8)
-        val in = new DataInputStream(new BufferedInputStream(new FileInputStream(location)))
+        val in = new ObjectInputStream(new BufferedInputStream(new FileInputStream(location)))
         try {
-            in.readFully(bytes)
+            in.readObject.asInstanceOf[ServerState]
         } finally {
             in.close
         }
-        val m = new Array[Double](w * h)
-        ByteBuffer.wrap(bytes).asDoubleBuffer.get(m)
-        null: ServerState //Matrix(w, h, m, /*TODO*/null, /*TODO*/null)
     }
 }

@@ -10,6 +10,7 @@ class MatrixWorker(
     range: Ranges.Pair,
     dataManager: DataManager) extends java.util.concurrent.Callable[Compute] {
   private type AD = Array[Double]
+  private type AL = Array[Long]
   
   @volatile
   private var _canceled = false
@@ -22,22 +23,23 @@ class MatrixWorker(
     val h = state.h
     val transposedWeights = this.transposedWeights
     val hiddenBias = state.hidden
-    val visibleBias = state.hidden
+    val visibleBias = state.visible
     
     val start = range.start
     val end = range.end
-    val sample = 0.05
+    val sample = state.sample
+    val steps = state.steps
     
-    val v0 = new AD(w)
-    val h0 = new AD(h)
-    val v1 = new AD(w)
-    val h1 = new AD(h)
+    val v0 = new AL(w)
+    val h0 = new AL(h)
+    val v1 = new AL(w)
+    val h1 = new AL(h)
     
-    val cd = new AD(w * h)
+    val cd = new AL(w * h)
     
     val iter = dataManager.iter(start, end)
-    val vAct = new Array[Long](w)
-    val hAct = new Array[Long](h)
+    val vAct = new AL(w)
+    val hAct = new AL(h)
     var count: Long = 0
     while (iter.hasNext) {
       if (random.nextDouble < sample) {
@@ -46,6 +48,12 @@ class MatrixWorker(
         mult(v0, weights, hiddenBias)(h0)
         mult(h0, transposedWeights, visibleBias)(v1)
         mult(v1, weights, hiddenBias)(h1)
+        var i = steps
+        while (i > 1) {
+          mult(h1, transposedWeights, visibleBias)(v1)
+          mult(v1, weights, hiddenBias)(h1)
+          i -= 1
+        }
         explode(v0, h0, v1, h1)(cd)
         mergeActivations(v0, v1)(vAct)
         mergeActivations(h0, h1)(hAct)
@@ -57,20 +65,20 @@ class MatrixWorker(
     Compute(cd, vAct, hAct, count)
   }
   
-  def mult(v: AD, m: AD, bias: AD)(out: AD) = {
+  def mult(v: AL, m: AD, bias: AD)(out: AL) = {
     var i = 0
     var y = 0
     var x = 0
     var sum = 0.0
     val vLength = v.length
-    val outLength = out.length
-    while (i < outLength) {
+    val mLength = m.length
+    while (i < mLength) {
       sum += m(i) * v(x)
       i += 1
       x += 1
       if (x == vLength) {
         sum = 1.0 / (1.0 + exp(-sum - bias(y)))
-        out(y) = if (sum >= random.nextDouble()) 1.0 else 0.0
+        out(y) = if (sum >= random.nextDouble()) 1 else 0
         y += 1
         x = 0
         sum = 0.0
@@ -78,7 +86,7 @@ class MatrixWorker(
     }
   }
   
-  def explode(v1: AD, h1: AD, v2: AD, h2: AD)(m: AD) {
+  def explode(v1: AL, h1: AL, v2: AL, h2: AL)(m: AL) {
     var i = 0
     var y = 0
     var x = 0
@@ -87,28 +95,28 @@ class MatrixWorker(
     val v1Length = v1.length
     val mLength = m.length
     while (i < mLength) {
-      m(i) += v1(x) * h1y - v2(x) * h2y
-      i += 1
-      x += 1
       if (x == v1Length) {
         y += 1
         x = 0
         h1y = h1(y)
         h2y = h2(y)
       }
+      m(i) += v1(x) * h1y - v2(x) * h2y
+      i += 1
+      x += 1
     }
   }
   
-  def mergeActivations(a: AD, b: AD)(out: Array[Long]) = {
+  def mergeActivations(a: AL, b: AL)(out: AL) = {
     var i = 0
     val outLength = out.length
     while (i < outLength) {
-      out(i) += (a(i) - b(i)).toLong
+      out(i) += a(i) - b(i)
       i += 1
     }
   }
   
-  def toBinaryDoubleArray(src: Array[Byte], dest: Array[Double]) {
+  def toBinaryDoubleArray(src: Array[Byte], dest: AL) {
     var i = 0
     val destLength = dest.length
     while (i < destLength) {

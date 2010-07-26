@@ -42,7 +42,39 @@ object Server {
     }
 }
 
-case class ServerState(state: State, epsilon: Double, momentum: Double, momentums: Array[Double], weightcost: Double)
+case class Momentum(momentum: Array[Double], vis: Array[Double], hidden: Array[Double])
+
+final case class ServerState(state: State, momentum: Momentum) {
+    def +(compute: Compute): ServerState = {
+        val config = Config.config.getState
+        val (wScore, newWeights, newMomentum) = applyContrastiveDivergence(config, config.wMomentum, momentum.momentum, state.weights, compute.cd, compute.count)
+        val (vScore, newVisibleBias, newVisMomentum) = applyContrastiveDivergence(config, config.vMomentum, momentum.vis, state.visible, compute.vAct, compute.count)
+        val (hScore, newHiddenBias, newHidMomentum) = applyContrastiveDivergence(config, config.hMomentum, momentum.hidden, state.hidden, compute.hAct, compute.count)
+        val newState = State(newWeights, newHiddenBias, newVisibleBias, config.sample, config.steps)
+        println(List(wScore, vScore, hScore, wScore + vScore + hScore) mkString "\t")
+        ServerState(newState, Momentum(newMomentum, newVisMomentum, newHidMomentum))
+    }
+    
+    def applyContrastiveDivergence(config: ConfigState, momentumFactor: Double, momentums: Array[Double], weights: Array[Double], cd: Array[Long], count: Long) = {
+        val epsilon = config.epsilon
+        val weightcost = config.weightcost
+        
+        val newWeights = new Array[Double](weights.length)
+        val newMomentums = new Array[Double](momentums.length)
+        
+        var i = 0
+        var score = 0.0
+        val cdLength = cd.length
+        while (i < cdLength) {
+            val cdNorm = cd(i).toDouble / count
+            score += cdNorm * cdNorm
+            newMomentums(i) = momentumFactor * momentums(i) + epsilon * (cdNorm - weightcost * weights(i))
+            newWeights(i) = weights(i) + newMomentums(i)
+            i += 1
+        }
+        (score, newWeights, newMomentums)
+    }
+}
 
 private object ServerActor {
   case class Connect(client: ClientOutbound)
@@ -113,30 +145,14 @@ class ServerActor(
   }
   
   private def shift = {
-    val newMomentums = new Array[Double](serverState.momentums.length)
-    val newWeights = new Array[Double](newMomentums.length)
-    val newHiddenBias = new Array[Double](0)
-    val newVisibleBias = new Array[Double](0)
-    UtilMethods.applyContrastiveDivergence(
-            serverState.momentum,
-            serverState.momentums,
-            serverState.epsilon,
-            compute.cd,
-            compute.count,
-            serverState.weightcost,
-            serverState.state.weights,
-            newMomentums,
-            newWeights
-        )
-    // TODO: Adjust bias
-    val newState = State(newWeights, newHiddenBias, newVisibleBias)
-    serverState = ServerState(newState, serverState.epsilon, serverState.momentum, newMomentums, serverState.weightcost)
+    serverState += compute
     matrixRecorder.record(serverState, 0.0)
     compute = null
     outstanding = dataManager.ranges
+    val newState = serverState.state
     val parts = outstanding.parts
     clients foreach { case (client, state) =>
-      client.newWork(newState, outstanding.parts: _*)
+      client.newWork(newState, parts: _*)
       state.done = false
       state.assigned = Ranges.empty
     }

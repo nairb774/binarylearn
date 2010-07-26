@@ -22,14 +22,14 @@ class UtilMethodsTest extends SpecificationWithJUnit {
             Array(1.0, 4.0, 2.0, 5.0, 3.0, 6.0))
   }
   
-  "toBinaryDoubleArray" should {
+  /*"toBinaryDoubleArray" should {
     "simple" >> {
       val in = Array[Byte](0, 1, 2, 0)
       val out = new Array[Double](in.length)
       UtilMethods.toBinaryDoubleArray(in, out);
       out must matchArray(Array(0.0, 1.0, 1.0, 0.0))
     }
-  }
+  }*/
   
   /*"mult" should {
       "" >> {
@@ -43,7 +43,7 @@ class UtilMethodsTest extends SpecificationWithJUnit {
       }
   }*/
   
-  "explode" should {
+  /*"explode" should {
       "work" >> {
           val v1 = Array(1.0, 2.0, 3.0)
           val h1 = Array(3.0, 4.0)
@@ -53,7 +53,7 @@ class UtilMethodsTest extends SpecificationWithJUnit {
           UtilMethods.explode(v1, h1, v2, h2, out)
           out must matchArray(Array(-11.0, -36.0, 2.0, -12.0, -40.0, 4.0))
       }
-  }
+  }*/
   
   case class matchArray(a: Array[Double]) extends matcher.Matcher[Array[Double]] {
     import java.util.Arrays

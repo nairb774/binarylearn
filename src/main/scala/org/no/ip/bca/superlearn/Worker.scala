@@ -18,7 +18,7 @@ import java.util.concurrent.RunnableFuture
 import org.no.ip.bca.scala.Ranges
 import org.no.ip.bca.scala.utils.actor.ReActor
 
-case class State(weights: Array[Double], hidden: Array[Double], visible: Array[Double]) {
+case class State(weights: Array[Double], hidden: Array[Double], visible: Array[Double], sample: Double, steps: Int) {
     def w = visible.length
     def h = hidden.length
     def transposedWeights = {
@@ -28,12 +28,23 @@ case class State(weights: Array[Double], hidden: Array[Double], visible: Array[D
     }
 }
 
-case class Compute(cd: Array[Double], vAct: Array[Long], hAct: Array[Long], count: Long) {
+case class Compute(cd: Array[Long], vAct: Array[Long], hAct: Array[Long], count: Long) {
     def +(c: Compute) = {
-        val newCd = UtilMethods.sum(cd, c.cd, new Array[Double](cd.length))
-        val newVAct = UtilMethods.sum(vAct, c.vAct, new Array[Long](vAct.length))
-        val newHAct = UtilMethods.sum(hAct, c.hAct, new Array[Long](hAct.length))
+        val newCd = sum(cd, c.cd)
+        val newVAct = sum(vAct, c.vAct)
+        val newHAct = sum(hAct, c.hAct)
         Compute(newCd, newVAct, newHAct, count + c.count)
+    }
+    
+    def sum(a: Array[Long], b: Array[Long]) = {
+        val aLength = a.length
+        val c = new Array[Long](a.length)
+        var i = 0
+        while (i < aLength) {
+            c(i) = a(i) + b(i)
+            i += 1
+        }
+        c
     }
 }
 
