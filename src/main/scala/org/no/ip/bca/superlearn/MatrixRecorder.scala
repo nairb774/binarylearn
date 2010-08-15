@@ -10,20 +10,20 @@ import scala.actors.Actor.actor
 import org.no.ip.bca.scala.Ranges
 
 class MatrixRecorder(dir: File) {
-    def record(serverState: ServerState, error: Double) = {
-        val when = System.currentTimeMillis
-        println(when + " " + error)
-        actor {
-            val digest = MessageDigest.getInstance("SHA1")
-            val out = new ObjectOutputStream(new BufferedOutputStream(new DigestOutputStream(
-                    new FileOutputStream(new File(dir, when.toString)), digest)))
-            try {
-                out.writeObject(serverState)
-                out.writeDouble(error)
-                out.write(digest.digest)
-            } finally {
-                out.close
-            }
-        }
+  def record(serverState: ServerState) = {
+    val when = System.currentTimeMillis
+    val score = serverState.score
+    println(score + " " + when + " " + score.total)
+    actor {
+      val digest = MessageDigest.getInstance("SHA1")
+      val out = new ObjectOutputStream(new BufferedOutputStream(new DigestOutputStream(
+        new FileOutputStream(new File(dir, when.toString)), digest)))
+      try {
+        out.writeObject(serverState)
+        out.write(digest.digest)
+      } finally {
+        out.close
+      }
     }
+  }
 }

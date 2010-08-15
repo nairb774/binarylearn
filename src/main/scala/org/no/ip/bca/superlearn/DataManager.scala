@@ -6,33 +6,27 @@ import java.nio._
 import org.no.ip.bca.scala.Ranges
 
 object DataBlock {
+  import com.google.common.io.Files.map
   def readBitmap(file: File, count: Int) = {
     val block = new Array[Byte](count)
-    if (file.exists) {
-      val channel = new RandomAccessFile(file, "rw")
-      try {
-        channel.readFully(block)
-      } finally {
-        channel.close
-      }
+    val buffer = map(file)
+    buffer.get(block)
+    /*val exists = file.exists
+    val channel = new RandomAccessFile(file, "rw")
+    if (exists) {
+      channel.readFully(block)
     } else {
-      val channel = new RandomAccessFile(file, "rw")
-      try {
-        channel.write(block)
-      } finally {
-        channel.close
-      }
-    }
-    block
+      channel.write(block)
+    }*/
+    (block, buffer)
   }
 }
 
 class DataBlock(file: File, offset: Long, headerSize: Int) {
-  private val bitmap = DataBlock.readBitmap(file, headerSize)
+  private val (bitmap, raf) = DataBlock.readBitmap(file, headerSize)
   private var min = Integer.MAX_VALUE
   private var max = Integer.MIN_VALUE
-  private val raf = new RandomAccessFile(file, "rw")
-  
+
   def ranges = {
     val l = new scala.collection.mutable.ListBuffer[Ranges.Pair]
     val top = headerSize * 8 + offset
@@ -62,14 +56,15 @@ class DataBlock(file: File, offset: Long, headerSize: Int) {
   }
   def read(_pos: Long, block: Array[Byte]) = {
     val pos = _pos - offset
-    raf.seek(headerSize + pos * block.length)
-    raf.readFully(block)
+    raf position (headerSize + pos * block.length).toInt
+    //raf.seek(headerSize + pos * block.length)
+    raf.get(block)
   }
   def write(_pos: Long, block: Array[Byte]) = {
     val pos = (_pos - offset)
-    raf.seek(headerSize + pos * block.length)
-    raf.write(block)
-    
+    raf position (headerSize + pos * block.length).toInt
+    raf.put(block)
+
     val bytePos = (pos / 8).toInt
     bitmap(bytePos) = (bitmap(bytePos) | (1 << (pos & 7))).asInstanceOf[Byte]
     if (bytePos < min) min = bytePos
@@ -77,8 +72,8 @@ class DataBlock(file: File, offset: Long, headerSize: Int) {
   }
   def flush = {
     if (min <= max) {
-      raf.seek(min)
-      raf.write(bitmap, min, max - min + 1)
+      raf position (min)
+      raf.put(bitmap, min, max - min + 1)
       val count = max - min
       min = Integer.MAX_VALUE
       max = Integer.MIN_VALUE
@@ -88,14 +83,14 @@ class DataBlock(file: File, offset: Long, headerSize: Int) {
   def close = try {
     flush
   } finally {
-    raf.close
+    raf.force
   }
 }
 
 class DataBlockPoolFactory(root: File, headerSize: Int) extends org.apache.commons.pool.BaseKeyedPoolableObjectFactory {
   def makeObject(_key: AnyRef) = {
-   val key = _key.asInstanceOf[Long]
-   new DataBlock(new File(root, key.toString), key, headerSize)
+    val key = _key.asInstanceOf[Long]
+    new DataBlock(new File(root, key.toString), key, headerSize)
   }
   override def destroyObject(_key: AnyRef, _value: AnyRef) = {
     val value = _value.asInstanceOf[DataBlock]
@@ -109,7 +104,7 @@ class DataManager(val folder: File, val size: Int, val max: Long, spans: Int) {
   private var blocks = {
     val ret = new org.apache.commons.pool.impl.GenericKeyedObjectPool(new DataBlockPoolFactory(folder, spans / 8))
     ret setMaxActive 1 // per key
-    ret setMaxTotal 25
+    ret setMaxTotal 250
     ret setTimeBetweenEvictionRunsMillis (5 * 60 * 1000)
     ret
   }
@@ -118,7 +113,7 @@ class DataManager(val folder: File, val size: Int, val max: Long, spans: Int) {
     var i = 0L
     var ranges = Ranges()
     while (i < max) {
-      ranges |= getDataBlock(i){_.ranges}
+      ranges |= getDataBlock(i) { _.ranges }
       i += spans
     }
     ranges
@@ -132,31 +127,37 @@ class DataManager(val folder: File, val size: Int, val max: Long, spans: Int) {
       blocks.returnObject(floor, block)
     }
   }
-  def has(pos: Long) = getDataBlock(pos){_.has(pos)}
+  def has(pos: Long) = getDataBlock(pos) { _.has(pos) }
   def ranges = _rangesLock.synchronized { _ranges }
   def read(pos: Long): Array[Byte] = {
     val block = new Array[Byte](size)
     read(pos, block)
     block
   }
-  def read(pos: Long, block: Array[Byte]) = getDataBlock(pos){_.read(pos, block)}
+  def read(pos: Long, block: Array[Byte]) = getDataBlock(pos) { _.read(pos, block) }
   def write(pos: Long, block: Array[Byte]) = {
-    getDataBlock(pos){_.write(pos, block)}
+    getDataBlock(pos) { _.write(pos, block) }
     _rangesLock.synchronized { _ranges |= pos }
   }
-  def iter(start: Long, end: Long) = new DataIterator(this, start, end, size)
+  def iter(pair: Ranges.Pair): DataIterator = iter(pair.start, pair.end)
+  def iter(start: Long, end: Long): DataIterator = new DataIteratorImpl(this, start, end, size)
   def clear = blocks.clear
   def close = blocks.close
 }
 
-class DataIterator(manager: DataManager, start: Long, end: Long, size: Int) extends Iterator[Array[Byte]] {
-  private val array = new Array[Byte](size)
+trait DataIterator extends Iterator[Array[Byte]] {
+  val out: Array[Byte]
+  def skip: Unit
+}
+
+class DataIteratorImpl(manager: DataManager, start: Long, end: Long, size: Int) extends DataIterator {
+  val out = new Array[Byte](size)
   private var pos = start
   def hasNext = pos < end
   def next = {
-    manager.read(pos, array)
+    manager.read(pos, out)
     pos += 1
-    array
+    out
   }
   def skip = {
     pos += 1

@@ -1,7 +1,6 @@
 package org.no.ip.bca.superlearn.visualize;
 
 import java.io.PrintWriter;
-import java.util.Formatter;
 
 public class FastCode {
     public static double[] minmax(final double[] a) {

@@ -3,9 +3,9 @@ package org.no.ip.bca.superlearn;
 import java.security.SecureRandom;
 
 /**
- * This class is a modification of the {@link java.util.Random} class and contains a lot
- * of copied methods. As such this class is licensed GPLv2+classpath to fulfill
- * the requirements of the source class.
+ * This class is a modification of the {@link java.util.Random} class and
+ * contains a lot of copied methods. As such this class is licensed
+ * GPLv2+classpath to fulfill the requirements of the source class.
  */
 class FastRandom {
     public static final SecureRandom SECURE_RANDOM = new SecureRandom();
@@ -33,7 +33,7 @@ class FastRandom {
     
     public long nextLong() {
         // it's okay that the bottom word remains signed.
-        return ((long)(next(32)) << 32) + next(32);
+        return ((long) (next(32)) << 32) + next(32);
     }
     
     public long nextLong(final long n) {

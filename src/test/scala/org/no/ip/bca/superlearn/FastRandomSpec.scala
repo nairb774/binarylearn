@@ -6,9 +6,9 @@ object FastRandomSpec extends FastRandomTest
 class FastRandomTest extends SpecificationWithJUnit {
   "nextDouble" should {
     def run(f: (Double) => Unit) = {
-      for(i <- 0 until 100) {
+      for(i <- 0 until 10) {
         val fr = new FastRandom
-        for(i <- 0 until 1000) {
+        for(i <- 0 until 10) {
           f(fr.nextDouble)
         }
       }

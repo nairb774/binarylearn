@@ -10,6 +10,8 @@ import org.no.ip.bca.superlearn._
 
 object Visualize {
     def main(args: Array[String]): Unit = {
+        testFastRandom
+        exit(0)
         val dir = new File(args(0))
         val w = Integer.parseInt(args(1))
         val h = Integer.parseInt(args(2))
@@ -17,6 +19,23 @@ object Visualize {
         val v = new Visualize(dir, w, h, outDir)
         v.writeTopo
         //v.makeDiffs
+    }
+    
+    def testFastRandom = {
+        val fr = new FastRandom
+        val bins = new Array[Long](10)
+        var i = 0
+        while (i < 100000) {
+            val d = fr.nextDouble
+            var d_ = 0.1
+            var j = 0
+            while (d >= j) {
+                d_ += 0.1
+                j += 1
+            }
+            bins(j) += 1
+        }
+        println(bins mkString " ")
     }
 }
 

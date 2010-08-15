@@ -8,7 +8,7 @@ class UtilMethodsTest extends SpecificationWithJUnit {
     def handle(in: Array[Double])(w: Int, h: Int)(expect: Array[Double]) = {
       val out = new Array[Double](in.length)
       UtilMethods.transpose(in, w, h, out)
-      out must matchArray(expect)
+      out must matchDoubleArray(expect)
     }
     "simple 1x1" >> handle(Array(1.0))(1, 1)(Array(1.0))
     "simple 2x2" >> handle(Array(1.0, 2.0, 3.0, 4.0))(2, 2)(Array(1.0, 3.0, 2.0, 4.0))
@@ -54,12 +54,4 @@ class UtilMethodsTest extends SpecificationWithJUnit {
           out must matchArray(Array(-11.0, -36.0, 2.0, -12.0, -40.0, 4.0))
       }
   }*/
-  
-  case class matchArray(a: Array[Double]) extends matcher.Matcher[Array[Double]] {
-    import java.util.Arrays
-    def apply(v: => Array[Double]) = {
-        val _v = v()
-        (Arrays.equals(_v, a), "okMessage", Arrays.toString(_v))
-    }
-  }
 }

@@ -1,15 +1,15 @@
 package org.no.ip.bca.superlearn
 
 object Client {
-    def main(args: Array[String]): Unit = {
-        val props = new Props(args(0))
-        val melder = Bridger.connect(props)
-        for (i <- 0 until props.processors) {
-            val client = new ClientActor(melder(), props.dataManager)
-            client.start
-            melder.connect(new ClientActorBridge(client))
-        }
+  def main(args: Array[String]): Unit = {
+    val props = new Props(args(0))
+    val melder = Bridger.connect(props)
+    for (i <- 0 until props.processors) {
+      val client = new ClientActor(melder(), props.dataManager)
+      client.start
+      melder.connect(new ClientActorBridge(client))
     }
+  }
 }
 
 import java.util.UUID
@@ -18,38 +18,41 @@ import java.util.concurrent.RunnableFuture
 import org.no.ip.bca.scala.Ranges
 import org.no.ip.bca.scala.utils.actor.ReActor
 
-case class State(weights: Array[Double], hidden: Array[Double], visible: Array[Double], sample: Double, steps: Int) {
-    def w = visible.length
-    def h = hidden.length
-    def transposedWeights = {
-        val t = new Array[Double](weights.length)
-        UtilMethods.transpose(weights, w, h, t)
-        t
-    }
+case class ClientConfig(sample: Double, steps: Int)
+
+case class State(weights: Array[Double], hidden: Array[Double], visible: Array[Double]) {
+  def w = visible.length
+  def h = hidden.length
+  def transposedWeights = {
+    val t = new Array[Double](weights.length)
+    UtilMethods.transpose(weights, w, h, t)
+    t
+  }
 }
 
 case class Compute(cd: Array[Long], vAct: Array[Long], hAct: Array[Long], count: Long) {
-    def +(c: Compute) = {
-        val newCd = sum(cd, c.cd)
-        val newVAct = sum(vAct, c.vAct)
-        val newHAct = sum(hAct, c.hAct)
-        Compute(newCd, newVAct, newHAct, count + c.count)
+  def +(c: Compute) = {
+    val newCd = sum(cd, c.cd)
+    val newVAct = sum(vAct, c.vAct)
+    val newHAct = sum(hAct, c.hAct)
+    Compute(newCd, newVAct, newHAct, count + c.count)
+  }
+
+  def sum(a: Array[Long], b: Array[Long]) = {
+    val aLength = a.length
+    val c = new Array[Long](a.length)
+    var i = 0
+    while (i < aLength) {
+      c(i) = a(i) + b(i)
+      i += 1
     }
-    
-    def sum(a: Array[Long], b: Array[Long]) = {
-        val aLength = a.length
-        val c = new Array[Long](a.length)
-        var i = 0
-        while (i < aLength) {
-            c(i) = a(i) + b(i)
-            i += 1
-        }
-        c
-    }
+    c
+  }
 }
 
 private object ClientActor {
-  case class NewWork(state: State, ranges: Ranges.Pair*)
+  case class NewConfig(clientConfig: ClientConfig)
+  case class NewWork(state: State, ranges: List[Ranges.Pair])
   case class Assigned(id: UUID, range: Ranges.Pair)
   case class Data(point: Long, data: Array[Byte])
   case class Finished(future: RunnableFuture[Compute])
@@ -59,7 +62,8 @@ class ClientActorBridge(client: ClientActor) extends ClientOutbound {
   import ClientActor._
   def assigned(id: UUID, range: Ranges.Pair) = client ! Assigned(id, range)
   def sendData(point: Long, data: Array[Byte]) = client ! Data(point, data)
-  def newWork(state: State, ranges: Ranges.Pair*) = client ! NewWork(state, ranges: _*)
+  def newWork(state: State, ranges: List[Ranges.Pair]) = client ! NewWork(state, ranges)
+  def newConfig(clientConfig: ClientConfig) = client ! NewConfig(clientConfig)
 }
 
 trait ServerOutbound {
@@ -69,58 +73,68 @@ trait ServerOutbound {
 }
 
 class ClientActor(
-    outbound: ServerOutbound,
-    dataManager: DataManager
-    ) extends ReActor {
+  outbound: ServerOutbound,
+  dataManager: DataManager) extends ReActor {
   import ClientActor._
   private type PF = PartialFunction[Any, Unit]
   private val id = UUID.randomUUID
+  println(id)
   private val random = new FastRandom
-  
+
   private var availableRanges = Ranges.empty
+  private var clientConfig: ClientConfig = null
   private var state: State = null
   private var transposedWeights: Array[Double] = null
-  
+
   private var compute: Compute = null
   
+  private val exec = java.util.concurrent.Executors.newCachedThreadPool()
   private var workingRange: Ranges.Pair = null
   private var work: RunnableFuture[Compute] = null
-  
+  private var workStart: Long = 0
+  private var workRate = 50.0
+
   override def to(f: PF) = {
     reAct = f
     super.to(f)
   }
-  
+
   private def finished(f: => Nothing): PF = {
-    case Finished(future) => if (future eq work) f
+    case Finished(future) =>
+      if (future eq work) {
+        workStart = System.nanoTime - workStart
+        f
+      }
   }
-  
+
   private def workingState: PF =
-      finished(to(finishedWorkingState)) orElse
+    finished(to(finishedWorkingState)) orElse
       myAssigned(to(verifiedWorkingState))
-  
+
   private def finishedWorkingState: PF =
-      myAssigned(commit)
-  
+    myAssigned(commit)
+
   private def verifiedWorkingState: PF =
-      finished(commit) orElse
+    finished(commit) orElse
       otherAssigned
-  
+
   private def awaitMatrixState: PF = {
+    case NewConfig(clientConfig) =>
+      this.clientConfig = clientConfig
     case NewWork(state, ranges) =>
       this.state = state
       this.transposedWeights = state.transposedWeights
       availableRanges = Ranges(ranges)
       findWork
   }
-  
+
   private def awaitDataState: PF = ({
     case Data(point, data) =>
       dataManager.write(point, data)
       findWork
   }: PF) orElse
-     otherAssigned
-  
+    otherAssigned
+
   private def myAssigned(success: => Nothing): PF = {
     case Assigned(_id, range) =>
       availableRanges /= range
@@ -129,25 +143,33 @@ class ClientActor(
       } else if (!(Ranges(range) & workingRange).isEmpty) {
         work.cancel(false)
         work = null
-        findWork
+        to(awaitAssigned)
       }
   }
-  
+
+  private def awaitAssigned: PF = {
+    case Assigned(_id, range) =>
+      availableRanges /= range
+      if (_id == id) {
+        workingRange = range
+        startWorker
+        to(verifiedWorkingState)
+      }
+  }
+
   private def otherAssigned: PF = {
     case Assigned(_id, range) =>
       availableRanges /= range
-      assert(id != _id, "We are not expecting any works requests to come back")
+      assert(id != _id, "We are not expecting any work requests to come back " + id + " " + range)
   }
-  
+
   private def findWork = {
     if (availableRanges.isEmpty) {
       // Send matrix
       outbound.sendCompute(compute)
       state = null
       transposedWeights = null
-      
       compute = null
-      
       to(awaitMatrixState)
     }
     val pickFrom = availableRanges & dataManager.ranges
@@ -155,26 +177,31 @@ class ClientActor(
       val pair = availableRanges.head
       val point = pair.start + random.nextLong(pair.end - pair.start)
       outbound.requestPoint(point)
-      
       to(awaitDataState)
     } else {
-      // Pick
-      workingRange = pickFrom.head.withMaxLength(10240)
-      // Start work
-      val worker = new MatrixWorker(state, transposedWeights, workingRange, dataManager)
-      work = new MatrixWorkerFuture(worker, future => this ! Finished(future))
-      val thread = new Thread(work)
-      thread.setDaemon(true)
-      thread.setName("Matrix math thread")
-      thread.start
+      // Pick a random pair - and a random range in that pair. Hopefully we avoid colliding then.
+      // We add 1 to the rate in case the rate drops to < 1 per second
+      workingRange = pickRange(pickFrom)
+      startWorker
       // Send request
       outbound.request(id, workingRange)
       to(workingState)
     }
   }
-  
+
+  private def pickRange(range: Ranges) = {
+    // We add 1 to the rate in case the rate drops to < 1 per second
+    val count = (workRate / clientConfig.sample).toLong + 1
+    val rangeLength = range.length
+    val p = range.parts.drop(if (rangeLength > 1) random.nextLong(rangeLength - 1).toInt else 0).head
+    val window = p.end - p.start - count
+    Ranges.Pair(if (window > 0) p.start + random.nextLong(window) else p.start, p.end).withMaxLength(count)
+  }
+
   private def commit = {
     val compute = work.get
+    workRate = workRate * 0.8 + 0.2 * compute.count / (workStart / 1E9)
+    println("RATE: " + workRate)
     if (this.compute == null) {
       this.compute = compute
     } else {
@@ -182,7 +209,15 @@ class ClientActor(
     }
     findWork
   }
-  
-  var reAct = awaitMatrixState
+
+  var reAct: PF = awaitMatrixState
+
+  private def startWorker: Unit = {
+    // Start work
+    val worker = MatrixWorker.builder(dataManager.iter(workingRange.start, workingRange.end)).worker(state, clientConfig, transposedWeights)
+    work = new MatrixWorkerFuture(worker, future => this ! Finished(future))
+    workStart = System.nanoTime
+    exec.execute(work)
+  }
 }
 
