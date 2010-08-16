@@ -4,6 +4,7 @@ import java.io.{ ByteArrayInputStream, ByteArrayOutputStream, DataInput, DataOut
 import java.lang.reflect.{ InvocationHandler, Method, Proxy }
 import java.util.IdentityHashMap
 
+import org.no.ip.bca.scala.LoggingSupport
 import org.no.ip.bca.scala.utils.actor.ReActor
 
 private object InvokeTypes {
@@ -51,7 +52,7 @@ private class ActiveProxy[T <: AnyRef](obj: T) extends InvocationHandler with Re
   }
 }
 
-class InvokeOut(out: DataOutputStream) extends ReActor {
+class InvokeOut(out: DataOutputStream) extends ReActor with LoggingSupport {
   import InvokeTypes._
   private case class Call(sig: MethodSig, args: Array[Byte])
   private case class NewMethod(sig: MethodSig, sigBytes: Array[Byte])
@@ -105,7 +106,7 @@ class InvokeOut(out: DataOutputStream) extends ReActor {
 
   def reAct = {
     case Call(sig, args) =>
-      // println(" SEND " + sig)
+      trace(" SEND {0}", sig)
       out.writeInt(methods.get(sig))
       out.writeInt(args.length)
       out.write(args)
@@ -126,7 +127,7 @@ class InvokeOut(out: DataOutputStream) extends ReActor {
   }
 }
 
-class InvokeIn(in: DataInput) extends Runnable {
+class InvokeIn(in: DataInput) extends Runnable with LoggingSupport {
   import InvokeTypes._
   private case class Call(method: MethodSig, args: Array[Byte])
 
@@ -140,7 +141,7 @@ class InvokeIn(in: DataInput) extends Runnable {
 
     def reAct = {
       case Call(methodSig, args) =>
-        // println(" RECV " + methodSig)
+        trace(" RECV {0}", methodSig)
         lookupMethod(methodSig).invoke(obj, fromBytes[Array[AnyRef]](args): _*)
     }
 
