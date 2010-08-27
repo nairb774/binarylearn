@@ -11,38 +11,15 @@ object Server {
 
   def main(args: Array[String]): Unit = {
     val props = new Props(args(0))
-    val port = props.serverPort
-    val ssocket = new ServerSocket(port)
-    val server = new ServerActor(props.dataManager, props.matrixRecorder, props.state)
-    server.start
-    handleSocket(props, server, ssocket)
-  }
-
-  private def handleSocket(props: Props, server: ServerActor, ssocket: ServerSocket): Unit = {
-    val socket = ssocket.accept
-    socket.setSoTimeout(props.timeout)
-    val out = new InvokeOut(new DataOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
-      override def handleException(e: Exception) = {
-        super.handleException(e)
-        exit()
-      }
-    }
-    out.start
-    val bridge = new ServerActorBridge(server, out.open[ClientOutbound](0))
-    val in = new InvokeIn(new DataInputStream(new BufferedInputStream(socket.getInputStream))) {
-      override def run = try {
-        super.run
-      } finally {
-        exit()
-      }
-    }
-    in + (0 -> bridge)
-    new Thread(in).start
-    handleSocket(props, server, ssocket)
+    Bridge2 { clientOutbound =>
+      val server = new ServerActor(props.fullRange, props.matrixRecorder, props.state, clientOutbound)
+      server.start
+      new ServerActorBridge(server)
+    } listen (props.serverPort, props.timeout)
   }
 }
 
-case class Momentum(momentum: Array[Double], vis: Array[Double], hidden: Array[Double])
+case class Momentum(momentum: Array[Double], hidden: Array[Double], visible: Array[Double])
 case class Score(w: Double, h: Double, v: Double) {
   def total = w + h + v
 }
@@ -51,15 +28,15 @@ final case class ServerState(state: State, momentum: Momentum, score: Score) {
   def +(compute: Compute): ServerState = {
     val config = Config.config.state
     val (wScore, newWeights, newMomentum) = applyContrastiveDivergence(config, config.wMomentum, momentum.momentum, state.weights, compute.cd, compute.count)
-    val (vScore, newVisibleBias, newVisMomentum) = applyContrastiveDivergence(config, config.vMomentum, momentum.vis, new Array(state.visible.length), compute.vAct, compute.count)
-    val (hScore, newHiddenBias, newHidMomentum) = applyContrastiveDivergence(config, config.hMomentum, momentum.hidden, new Array(state.hidden.length), compute.hAct, compute.count)
+    val (vScore, newVisibleBias, newVisibleMomentum) = applyBiasCD(config, config.vMomentum, momentum.visible, state.visible, compute.vAct, compute.count)
+    val (hScore, newHiddenBias, newHiddenMomentum) = applyBiasCD(config, config.hMomentum, momentum.hidden, state.hidden, compute.hAct, compute.count)
     val newState = State(newWeights, newHiddenBias, newVisibleBias)
-    val m = Momentum(newMomentum, newVisMomentum, newHidMomentum)
+    val m = Momentum(newMomentum, newHiddenMomentum, newVisibleMomentum)
     val score = Score(wScore, hScore, vScore)
     ServerState(newState, m, score)
   }
 
-  def applyContrastiveDivergence(config: ConfigState, momentumFactor: Double, momentums: Array[Double], weights: Array[Double], cd: Array[Long], count: Long) = {
+  private def applyContrastiveDivergence(config: ConfigState, momentumFactor: Double, momentums: Array[Double], weights: Array[Double], cd: Array[Long], count: Long) = {
     val epsilon = config.epsilon
     val weightcost = config.weightcost
 
@@ -78,45 +55,55 @@ final case class ServerState(state: State, momentum: Momentum, score: Score) {
     }
     (score, newWeights, newMomentums)
   }
+
+  private def applyBiasCD(config: ConfigState, momentumFactor: Double, momentum: Array[Double], bias: Array[Double], cd: Array[Long], count: Long) = {
+    val epsilon = config.epsilon
+    val weightcost = config.weightcost
+
+    val newMomentum = new Array[Double](momentum.length)
+    val newBias = new Array[Double](bias.length)
+
+    var i = 0
+    var score = 0.0
+    val cdLength = cd.length
+    while (i < cdLength) {
+      val cdNorm = cd(i).toDouble / count
+      score += cdNorm * cdNorm
+      newMomentum(i) = momentumFactor * momentum(i) + epsilon * cdNorm
+      newBias(i) = bias(i) + newMomentum(i)
+      i += 1
+    }
+    (score, newBias, newMomentum)
+  }
 }
 
 private object ServerActor {
-  case class Connect(client: ClientOutbound)
-  case class RequestPoint(point: Long, client: ClientOutbound)
-  case class RecieveCompute(compute: Compute, client: ClientOutbound)
-  case class Request(id: UUID, range: Ranges.Pair, client: ClientOutbound)
+  case class RecieveCompute(compute: Compute)
+  case class Request(id: UUID, range: Ranges.Pair)
 }
 
 trait ClientOutbound {
   def newConfig(clientConfig: ClientConfig): Unit
   def newWork(state: State, ranges: List[Ranges.Pair]): Unit
-  def sendData(point: Long, data: Array[Byte]): Unit
   def assigned(id: UUID, range: Ranges.Pair): Unit
 }
 
-class ServerActorBridge(server: ServerActor, private var _client: ClientOutbound) extends ServerOutbound {
+class ServerActorBridge(server: ServerActor) extends ServerOutbound {
   import ServerActor._
-  server ! Connect(_client)
 
-  def request(id: UUID, range: Ranges.Pair) = server ! Request(id, range, _client)
-  def sendCompute(compute: Compute) = server ! RecieveCompute(compute, _client)
-  def requestPoint(point: Long) = server ! RequestPoint(point, _client)
+  def request(id: UUID, range: Ranges.Pair) = server ! Request(id, range)
+  def sendCompute(compute: Compute) = server ! RecieveCompute(compute)
 }
 
 class ServerActor(
-  dataManager: DataManager,
+  fullRange: Ranges,
   matrixRecorder: MatrixRecorder,
-  private var serverState: ServerState) extends ReActor {
+  private var serverState: ServerState,
+  client: ClientOutbound) extends ReActor {
   import ServerActor._
-  private class ClientState {
-    var done = false
-    var assigned = Ranges.empty
-  }
   private type PF = PartialFunction[Any, Unit]
-  private var clients = Map.empty[ClientOutbound, ClientState]
-
   private var clientConfig = Config.config.clientConfig
-  private var outstanding = dataManager.ranges
+  private var outstanding = fullRange
   private var compute: Compute = null
   private val slope = 0.99
 
@@ -126,28 +113,8 @@ class ServerActor(
   private var timeStart = System.nanoTime
 
   val reAct: PF = {
-    case Connect(client) =>
-      clients += client -> new ClientState()
-      client.newConfig(clientConfig)
-      client.newWork(serverState.state, outstanding.parts)
-    case RequestPoint(point, client) =>
-      client.sendData(point, dataManager.read(point))
-    case RecieveCompute(compute, client) =>
-      // Mark off client
-      clients(client).done = true
-      // Merge matrix
-      if (compute != null) {
-        if (this.compute == null) {
-          this.compute = compute
-        } else {
-          this.compute += compute
-        }
-      }
-      // Check for next round
-      if (outstanding.isEmpty && clients.values.find(!_.done).isEmpty) {
-        shift
-      }
-    case Request(id, range, client) =>
+    case RecieveCompute(compute) => shift(compute)
+    case Request(id, range) =>
       requests += 1
       val a = if ((outstanding & range) == Ranges(range)) {
         requestSuccess += 1
@@ -157,12 +124,11 @@ class ServerActor(
       } else {
         outstanding.head.withMaxLength(range.end - range.start)
       }
-      clients.keys foreach { _.assigned(id, a) }
+      client.assigned(id, a)
       outstanding /= a
-      clients(client).assigned |= a
   }
 
-  private def shift = {
+  private def shift(compute: Compute) = {
     println("LOCK: " + requestSuccess.toDouble / requests.toDouble + " " + requests + " " + requestSuccess + " " + (requests - requestSuccess))
     serverState += compute
     matrixRecorder.record(serverState)
@@ -170,7 +136,7 @@ class ServerActor(
     if (serverState.score.total < 0.1) {
       config.setSteps(config.getSteps + 1)
     }
-    outstanding = dataManager.ranges
+    outstanding = fullRange
     val newState = serverState.state
     val parts = outstanding.parts
     val sendClientConfig = {
@@ -182,15 +148,9 @@ class ServerActor(
     val time = System.nanoTime - timeStart
     println("RATE: " + time + " " + (compute.count.toDouble / time * 1E9) + " " + time / compute.count)
     timeStart = System.nanoTime
-    compute = null
-    clients foreach {
-      case (client, state) =>
-        if (sendClientConfig) {
-          client.newConfig(clientConfig)
-        }
-        client.newWork(newState, parts)
-        state.done = false
-        state.assigned = Ranges.empty
+    if (sendClientConfig) {
+      client.newConfig(clientConfig)
     }
+    client.newWork(newState, parts)
   }
 }

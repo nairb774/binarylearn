@@ -1,13 +1,17 @@
 package org.no.ip.bca.superlearn
 
+import org.no.ip.bca.scala.FastRandom
+
 object Client {
   def main(args: Array[String]): Unit = {
     val props = new Props(args(0))
-    val melder = Bridger.connect(props)
+    val bridge = Bridge2.connect(props.serverHost, props.serverPort, props.timeout)
     for (i <- 0 until props.processors) {
-      val client = new ClientActor(melder(), props.dataManager)
-      client.start
-      melder.connect(new ClientActorBridge(client))
+      bridge add { serverOutbound =>
+        val client = new ClientActor(serverOutbound, props.memMapSource)
+        client.start
+        new ClientActorBridge(client)
+      }
     }
   }
 }
@@ -15,7 +19,7 @@ object Client {
 import java.util.UUID
 import java.util.concurrent.RunnableFuture
 
-import org.no.ip.bca.scala.Ranges
+import org.no.ip.bca.scala.{ LoggingSupport, Ranges }
 import org.no.ip.bca.scala.utils.actor.ReActor
 
 case class ClientConfig(sample: Double, steps: Int)
@@ -23,9 +27,24 @@ case class ClientConfig(sample: Double, steps: Int)
 case class State(weights: Array[Double], hidden: Array[Double], visible: Array[Double]) {
   def w = visible.length
   def h = hidden.length
-  def transposedWeights = {
+  lazy val transposedWeights = {
     val t = new Array[Double](weights.length)
-    UtilMethods.transpose(weights, w, h, t)
+    var m = 0
+    var y = 0
+    var x = 0
+    val matrix = weights
+    val mLen = matrix.length
+    val w = this.w
+    val h = this.h
+    while (m < mLen) {
+      t(x * h + y) = matrix(m)
+      m += 1
+      x += 1
+      if (x == w) {
+        y += 1
+        x = 0
+      }
+    }
     t
   }
 }
@@ -67,28 +86,26 @@ class ClientActorBridge(client: ClientActor) extends ClientOutbound {
 }
 
 trait ServerOutbound {
-  def requestPoint(point: Long): Unit
   def sendCompute(compute: Compute): Unit
   def request(id: UUID, range: Ranges.Pair): Unit
 }
 
 class ClientActor(
-  outbound: ServerOutbound,
-  dataManager: DataManager) extends ReActor {
+    outbound: ServerOutbound,
+    memMapSource: MemMapSource) extends ReActor with LoggingSupport {
   import ClientActor._
   private type PF = PartialFunction[Any, Unit]
   private val id = UUID.randomUUID
-  println(id)
+  trace(id)
   private val random = new FastRandom
 
   private var availableRanges = Ranges.empty
   private var clientConfig: ClientConfig = null
   private var state: State = null
-  private var transposedWeights: Array[Double] = null
 
   private var compute: Compute = null
-  
-  private val exec = java.util.concurrent.Executors.newCachedThreadPool()
+
+  private val exec = java.util.concurrent.Executors.newSingleThreadExecutor()
   private var workingRange: Ranges.Pair = null
   private var work: RunnableFuture[Compute] = null
   private var workStart: Long = 0
@@ -123,17 +140,9 @@ class ClientActor(
       this.clientConfig = clientConfig
     case NewWork(state, ranges) =>
       this.state = state
-      this.transposedWeights = state.transposedWeights
       availableRanges = Ranges(ranges)
       findWork
   }
-
-  private def awaitDataState: PF = ({
-    case Data(point, data) =>
-      dataManager.write(point, data)
-      findWork
-  }: PF) orElse
-    otherAssigned
 
   private def myAssigned(success: => Nothing): PF = {
     case Assigned(_id, range) =>
@@ -168,20 +177,12 @@ class ClientActor(
       // Send matrix
       outbound.sendCompute(compute)
       state = null
-      transposedWeights = null
       compute = null
       to(awaitMatrixState)
-    }
-    val pickFrom = availableRanges & dataManager.ranges
-    if (pickFrom.isEmpty) {
-      val pair = availableRanges.head
-      val point = pair.start + random.nextLong(pair.end - pair.start)
-      outbound.requestPoint(point)
-      to(awaitDataState)
     } else {
       // Pick a random pair - and a random range in that pair. Hopefully we avoid colliding then.
       // We add 1 to the rate in case the rate drops to < 1 per second
-      workingRange = pickRange(pickFrom)
+      workingRange = pickRange(availableRanges)
       startWorker
       // Send request
       outbound.request(id, workingRange)
@@ -201,7 +202,7 @@ class ClientActor(
   private def commit = {
     val compute = work.get
     workRate = workRate * 0.8 + 0.2 * compute.count / (workStart / 1E9)
-    println("RATE: " + workRate)
+    trace("RATE: {0}", workRate)
     if (this.compute == null) {
       this.compute = compute
     } else {
@@ -214,8 +215,9 @@ class ClientActor(
 
   private def startWorker: Unit = {
     // Start work
-    val worker = MatrixWorker.builder(dataManager.iter(workingRange.start, workingRange.end)).worker(state, clientConfig, transposedWeights)
-    work = new MatrixWorkerFuture(worker, future => this ! Finished(future))
+    val job = new MatrixJob(memMapSource, workingRange, state, clientConfig)
+    //val worker = MatrixWorker.builder(dataManager.iter(workingRange.start, workingRange.end)).worker(state, clientConfig, transposedWeights)
+    work = new MatrixWorkerFuture(job, future => this ! Finished(future))
     workStart = System.nanoTime
     exec.execute(work)
   }

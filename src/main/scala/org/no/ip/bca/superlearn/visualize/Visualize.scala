@@ -6,6 +6,7 @@ import java.io._
 import java.nio._
 import javax.imageio.ImageIO
 
+import org.no.ip.bca.scala.FastRandom
 import org.no.ip.bca.superlearn._
 
 object Visualize {

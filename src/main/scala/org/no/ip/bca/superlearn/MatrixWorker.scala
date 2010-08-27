@@ -2,7 +2,9 @@ package org.no.ip.bca.superlearn
 
 import java.lang.Math.exp
 
-import org.no.ip.bca.scala.Ranges
+import java.util.concurrent.Callable
+
+import org.no.ip.bca.scala.{ FastRandom, Ranges }
 
 class WorkerStep(
   m: Array[Double],
@@ -32,9 +34,7 @@ class WorkerStep(
       i += 1
       x += 1
       if (x == vLength) {
-        val s = sum + ">"
         sum = 1.0 / (1.0 + exp(-sum - bias(y)))
-        println(s + sum)
         out(y) = if (sum >= random.nextDouble()) 1 else 0
         y += 1
         x = 0
@@ -46,21 +46,36 @@ class WorkerStep(
   def skip = iter.skip
 }
 
+class MatrixJob(
+  source: MemMapSource,
+  range: Ranges.Pair,
+  state: State,
+  config: ClientConfig) extends Callable[Compute] {
+
+  @volatile
+  private var _canceled = false
+  def cancel = _canceled = true
+
+  def call: Compute = {
+    MatrixWorker.builder(source.iter(range)).worker(state, config)(_canceled)
+  }
+}
+
 object MatrixWorker {
   private type AD = Array[Double]
   class Builder private[MatrixWorker] (iter: DataIterator, random: FastRandom) {
     def preStep(m: AD, bias: AD): Builder = {
       new Builder(new WorkerStep(m, bias, iter, random), random)
     }
-    def worker(state: State, config: ClientConfig, transposedWeights: AD) = {
+    def worker(state: State, config: ClientConfig) = {
       val h0Iter = new WorkerStep(state.weights, state.hidden, iter, random)
 
-      var v1Iter = new WorkerStep(transposedWeights, state.visible, h0Iter, random)
+      var v1Iter = new WorkerStep(state.transposedWeights, state.visible, h0Iter, random)
       var h1Iter = new WorkerStep(state.weights, state.hidden, v1Iter, random)
 
       var i = config.steps
       while (i > 1) {
-        v1Iter = new WorkerStep(transposedWeights, state.visible, h1Iter, random)
+        v1Iter = new WorkerStep(state.transposedWeights, state.visible, h1Iter, random)
         h1Iter = new WorkerStep(state.weights, state.hidden, v1Iter, random)
         i -= 1
       }
@@ -79,15 +94,11 @@ class MatrixWorker(
   h1: Array[Byte],
   root: DataIterator,
   sample: Double,
-  random: FastRandom) extends java.util.concurrent.Callable[Compute] {
+  random: FastRandom) extends ((=> Boolean) => Compute) {
   private type AB = Array[Byte]
   private type AL = Array[Long]
 
-  @volatile
-  private var _canceled = false
-  def cancel = _canceled = true
-
-  def call: Compute = {
+  def apply(canceled: => Boolean): Compute = {
     val v0 = this.v0
     val h0 = this.h0
     val v1 = this.v1
@@ -106,7 +117,7 @@ class MatrixWorker(
     var count: Long = 0
     while (root.hasNext) {
       if (random.nextDouble < sample) {
-        if (_canceled) return null
+        if (canceled) return null
         root.next
         explode(v0, h0, v1, h1)(cd)
         mergeActivations(v0, v1)(vAct)
@@ -153,7 +164,7 @@ class MatrixWorker(
 import java.util.concurrent.FutureTask
 
 class MatrixWorkerFuture(
-  matrixWorker: MatrixWorker,
+  matrixWorker: MatrixJob,
   onDone: MatrixWorkerFuture => Unit) extends FutureTask(matrixWorker) {
   override def cancel(interrupt: Boolean) = {
     try {

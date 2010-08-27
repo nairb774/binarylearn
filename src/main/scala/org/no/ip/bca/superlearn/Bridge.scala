@@ -1,183 +1,153 @@
 package org.no.ip.bca.superlearn
 
+import java.io._
+import java.net._
+
 import java.util.UUID
 
-import org.no.ip.bca.scala.Ranges
+import org.no.ip.bca.scala.{ ActiveProxy, InvokeIn, InvokeOut, LoggingSupport, Ranges }
 import org.no.ip.bca.scala.utils.actor.ReActor
 
-object Bridger {
-  import java.io._
-  import java.net._
+private object Bridge2 {
+  trait ToClient extends ClientOutbound {
+    def connect(client: ClientOutbound): Unit
+  }
+  private class ToClientImpl extends ToClient with LoggingSupport {
+    private var clients = Set.empty[ClientOutbound]
+    private var clientConfig: ClientConfig = null
+    private var state: State = null
+    private var ranges = Ranges.empty
+    def connect(client: ClientOutbound): Unit = {
+      trace("CONNECT")
+      clients += client
+      if (clientConfig != null) {
+        client.newConfig(clientConfig)
+      }
+      if (state != null) {
+        client.newWork(state, ranges.parts)
+      }
+    }
+    def newConfig(clientConfig: ClientConfig): Unit = {
+      trace("NEW CONFIG")
+      this.clientConfig = clientConfig
+      clients foreach { _.newConfig(clientConfig) }
+    }
+    def newWork(state: State, ranges: List[Ranges.Pair]): Unit = {
+      trace("NEW WORK")
+      this.state = state
+      this.ranges = Ranges(ranges)
+      clients foreach { _.newWork(state, ranges) }
+    }
+    def assigned(id: UUID, range: Ranges.Pair): Unit = {
+      trace("ASSIGNED")
+      ranges /= range
+      clients foreach { _.assigned(id, range) }
+    }
+  }
+  trait ToServer extends ServerOutbound {
+    def connect: Unit
+  }
+  private class ToServerImpl(parent: ServerOutbound) extends ToServer {
+    private var count = 0
+    private var checkedIn = 0
+    private var compute: Compute = null
 
-  def main(args: Array[String]): Unit = {
-    val props = new Props(args(0))
-    val melder = connect(props)
-    val port = props.bridgePort
-    val ssocket = new ServerSocket(port)
-    handleSocket(props, melder, ssocket)
+    def connect = count += 1
+    def sendCompute(compute: Compute) = {
+      checkedIn += 1
+
+      if (compute != null) {
+        if (this.compute == null) {
+          this.compute = compute
+        } else {
+          this.compute += compute
+        }
+      }
+      check
+    }
+
+    private def check = {
+      if (count == checkedIn) {
+        parent.sendCompute(compute)
+        compute = null
+        checkedIn = 0
+      }
+    }
+    def request(id: UUID, range: Ranges.Pair) = parent.request(id, range)
   }
 
-  private def handleSocket(props: Props, melder: Melder, ssocket: ServerSocket): Unit = {
-    val socket = ssocket.accept
-    socket.setSoTimeout(props.timeout)
-    val out = new InvokeOut(new DataOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
-      override def handleException(e: Exception) = {
+  private class IIn(in: InputStream) extends InvokeIn(new DataInputStream(new BufferedInputStream(in))) {
+    override def run = try { super.run } finally { System.exit(0) }
+  }
+  
+  private class IOut(out: OutputStream) extends InvokeOut(new DataOutputStream(new BufferedOutputStream(out))) {
+    override def handleException(e: Throwable) = {
         super.handleException(e)
-        exit()
+        System.exit(0)
       }
-    }
+  }
+
+  private def toServer(upstreamOut: OutputStream): ToServer = {
+    val out = new IOut(upstreamOut)
     out.start
-    val clientOutbound = out.open[ClientOutbound](0)
-    val serverOutbound = melder(clientOutbound)
-    val in = new InvokeIn(new DataInputStream(new BufferedInputStream(socket.getInputStream))) {
-      override def run = try {
-        super.run
-      } finally {
-        exit()
-      }
-    }
+    ActiveProxy[ToServer](new ToServerImpl(out.open[ServerOutbound](0)))
+  }
+
+  private def serverOutbound(serverOutbound: ServerOutbound)(downstreamIn: InputStream) = {
+    val in = new IIn(downstreamIn)
     in + (0 -> serverOutbound)
-    new Thread(in).start
-    handleSocket(props, melder, ssocket)
+    in.start
   }
 
-  def connect(props: Props) = {
-    val dataManager = props.dataManager
-    val host = props.serverHost
-    val port = props.serverPort
-    val socket = new Socket(host, port)
-    socket.setSoTimeout(props.timeout)
-    val out = new InvokeOut(new DataOutputStream(new BufferedOutputStream(socket.getOutputStream))) {
-      override def handleException(e: Exception) = {
-        super.handleException(e)
-        exit()
-      }
-    }
+  private def toClient(upstreamIn: InputStream): ToClient = {
+    val tc = ActiveProxy[ToClient](new ToClientImpl)
+    val in = new IIn(upstreamIn)
+    in + (0 -> tc)
+    in.start
+    tc
+  }
+
+  private def clientOutbound(downstreamOut: OutputStream): ClientOutbound = {
+    val out = new IOut(downstreamOut)
     out.start
-    val serverOutbound = out.open[ServerOutbound](0)
-    val bridge = ActiveProxy[Bridge](new BridgeImpl(serverOutbound))
-    val bridgeClientOutbound = ActiveProxy[BridgeClientOutbound](new BridgeClientOutboundImpl(dataManager))
-    val in = new InvokeIn(new DataInputStream(new BufferedInputStream(socket.getInputStream))) {
-      override def run = try {
-        super.run
-      } finally {
-        exit()
-      }
+    out.open[ClientOutbound](0)
+  }
+
+  def connect(host: String, port: Int, soTimeout: Int) = {
+    val socket = new Socket(host, port)
+    socket.setSoTimeout(soTimeout)
+    new Bridge2(socket.getInputStream, socket.getOutputStream)
+  }
+
+  def apply(f: ClientOutbound => ServerOutbound) = new Bridge2(f)
+}
+
+class Bridge2 private (toClientInst: Bridge2.ToClient, toServerInst: Bridge2.ToServer) {
+  private def this(in: InputStream, out: OutputStream) = this(Bridge2.toClient(in), Bridge2.toServer(out))
+  private def this(toClientInst: Bridge2.ToClient, f: ClientOutbound => ServerOutbound) =
+    this(toClientInst, ActiveProxy(new Bridge2.ToServerImpl(f(toClientInst))))
+  private def this(f: ClientOutbound => ServerOutbound) = this(ActiveProxy(new Bridge2.ToClientImpl), f)
+
+  private def add(downstreamIn: InputStream, downstreamOut: OutputStream) = {
+    toClientInst.connect(Bridge2.clientOutbound(downstreamOut))
+    toServerInst.connect
+    Bridge2.serverOutbound(toServerInst)(downstreamIn)
+    this
+  }
+
+  def add(f: ServerOutbound => ClientOutbound) = {
+    toServerInst.connect
+    toClientInst.connect(f(toServerInst))
+    this
+  }
+
+  def listen(port: Int, soTimeout: Int): Unit = {
+    def loop(ssocket: ServerSocket, soTimeout: Int): Unit = {
+      val socket = ssocket.accept
+      socket.setSoTimeout(soTimeout)
+      add(socket.getInputStream, socket.getOutputStream)
+      loop(ssocket, soTimeout)
     }
-    in + (0 -> bridgeClientOutbound)
-    new Thread(in).start;
-    new Melder(bridge, bridgeClientOutbound, serverOutbound, dataManager)
-  }
-}
-
-class Melder(
-  bridge: Bridge,
-  bridgeClientOutbound: BridgeClientOutbound,
-  serverOutbound: ServerOutbound,
-  dataManager: DataManager) {
-  def apply(client: ClientOutbound) = {
-    bridgeClientOutbound.connect(client)
-    new SmartServerOutbound(new BridgeServerOutbound(bridge, serverOutbound), dataManager, client)
-  }
-
-  def apply() = {
-    new BridgeServerOutbound(bridge, serverOutbound)
-  }
-
-  def connect(client: ClientOutbound) = bridgeClientOutbound.connect(client)
-}
-
-trait BridgeClientOutbound extends ClientOutbound {
-  def connect(client: ClientOutbound): Unit
-}
-
-class BridgeClientOutboundImpl(dataManager: DataManager) extends BridgeClientOutbound {
-  private var clients = Set.empty[ClientOutbound]
-  private var clientConfig: ClientConfig = null
-  private var state: State = null
-  private var ranges = Ranges.empty
-  def connect(client: ClientOutbound): Unit = {
-    println("CONNECT")
-    clients += client
-    if (clientConfig != null) {
-      client.newConfig(clientConfig)
-    }
-    if (state != null) {
-      client.newWork(state, ranges.parts)
-    }
-  }
-  def newConfig(clientConfig: ClientConfig): Unit = {
-    println("NEW CONFIG")
-    this.clientConfig = clientConfig
-    clients foreach { _.newConfig(clientConfig) }
-  }
-  def newWork(state: State, ranges: List[Ranges.Pair]): Unit = {
-    println("NEW STATE")
-    this.state = state
-    this.ranges = Ranges(ranges)
-    clients foreach { _.newWork(state, ranges) }
-  }
-  def sendData(point: Long, data: Array[Byte]): Unit = {
-    dataManager.write(point, data)
-    clients foreach { _.sendData(point, data) }
-  }
-  def assigned(id: UUID, range: Ranges.Pair): Unit = {
-    ranges /= range
-    clients foreach { _.assigned(id, range) }
-  }
-}
-
-class SmartServerOutbound(parent: ServerOutbound, dataManager: DataManager, client: ClientOutbound) extends ServerOutbound {
-  def requestPoint(point: Long): Unit = {
-    if (dataManager.has(point)) {
-      client.sendData(point, dataManager.read(point))
-    } else {
-      parent.requestPoint(point)
-    }
-  }
-  def sendCompute(compute: Compute) = parent.sendCompute(compute)
-  def request(id: UUID, range: Ranges.Pair) = parent.request(id, range)
-}
-
-class BridgeServerOutbound(bridge: Bridge, parent: ServerOutbound) extends ServerOutbound {
-  bridge.connect(this)
-
-  def requestPoint(point: Long): Unit = parent.requestPoint(point)
-  def sendCompute(compute: Compute) = bridge.sendCompute(compute)
-  def request(id: UUID, range: Ranges.Pair) = parent.request(id, range)
-}
-
-trait Bridge {
-  def connect(server: ServerOutbound): Unit
-  def sendCompute(compute: Compute): Unit
-}
-
-class BridgeImpl(parent: ServerOutbound) extends Bridge {
-  private var servers = Set.empty[ServerOutbound]
-  private var checkedIn = 0
-  private var compute: Compute = null
-
-  def connect(server: ServerOutbound) = {
-    servers += server
-  }
-  def sendCompute(compute: Compute) = {
-    checkedIn += 1
-
-    if (compute != null) {
-      if (this.compute == null) {
-        this.compute = compute
-      } else {
-        this.compute += compute
-      }
-    }
-    check
-  }
-
-  def check = {
-    if (servers.size == checkedIn) {
-      parent.sendCompute(compute)
-      compute = null
-      checkedIn = 0
-    }
+    loop(new ServerSocket(port), soTimeout)
   }
 }
