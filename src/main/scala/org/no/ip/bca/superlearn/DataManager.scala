@@ -17,20 +17,21 @@ class MemMapSource(file: File, size: Int) {
     override def initialValue = Files.map(file)
   }
   def iter(range: Ranges.Pair) = {
-    val map = threadsMap.get
-    map limit (range.end * size).toInt
-    map position (range.start * size).toInt
-    new MemMapWalker(map, size)
+    new MemMapWalker(threadsMap.get, size, range)
   }
 }
 
-class MemMapWalker(map: MappedByteBuffer, size: Int) extends DataIterator {
+class MemMapWalker(map: MappedByteBuffer, size: Int, range: Ranges.Pair) extends DataIterator {
   val out = new Array[Byte](size)
-  def skip = map position (map.position + size)
+  private var pos = (range.start * size).toInt
+  private val limit = (range.end * size).toInt
+  def skip = pos += size
   def next = {
     val o = out
+    map position pos
     map.get(o)
+    pos += size
     o
   }
-  def hasNext = map.hasRemaining
+  def hasNext = pos < limit
 }
