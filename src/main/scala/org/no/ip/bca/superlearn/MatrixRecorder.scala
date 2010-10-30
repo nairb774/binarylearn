@@ -12,8 +12,6 @@ import org.no.ip.bca.scala.Ranges
 class MatrixRecorder(dir: File) {
   def record(serverState: ServerState) = {
     val when = System.currentTimeMillis
-    val score = serverState.score
-    println(score + " " + when + " " + score.total)
     actor {
       val digest = MessageDigest.getInstance("SHA1")
       val out = new ObjectOutputStream(new BufferedOutputStream(new DigestOutputStream(

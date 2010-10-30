@@ -64,9 +64,9 @@ class Visualize(dir: File, w: Int, h: Int, outDir: File) {
     }*/
     
     def makeTopo(state: State) = {
-        val minmax = FastCode.minmax(state.weights)
-        val minmaxV = FastCode.minmax(state.visible)
-        val minmaxH = FastCode.minmax(state.hidden)
+        val minmax = FastCode.minmax(state.weights.a)
+        val minmaxV = FastCode.minmax(state.visible.v)
+        val minmaxH = FastCode.minmax(state.hidden.v)
         val min = minmax(0)
         val spread = minmax(1) - min
         println(List(min, minmax(1), spread, minmaxV(0), minmaxV(1), minmaxV(1) - minmaxV(0), minmaxH(0), minmaxH(1), minmaxH(1) - minmaxH(0)) mkString " ")

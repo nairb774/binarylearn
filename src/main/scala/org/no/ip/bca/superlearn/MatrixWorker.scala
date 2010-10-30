@@ -6,44 +6,30 @@ import java.util.concurrent.Callable
 
 import org.no.ip.bca.scala.{ FastRandom, Ranges }
 
-class WorkerStep(
-  m: Array[Double],
-  bias: Array[Double],
-  iter: DataIterator,
-  random: FastRandom) extends DataIterator {
-  private type AB = Array[Byte]
-  private type AD = Array[Double]
-  val out = new AB(bias.length)
+import math.{ Matrix, Vector }
+import math.Types._
+import math.Implicits._
 
-  def hasNext = iter.hasNext
+class WorkerStep[L, R, M](
+  m: MatrixD[L, R],
+  bias: VectorD[R],
+  iter: DataIterator[L, M],
+  random: FastRandom) extends DataIterator[R, M] {
+
+  assert(m.columns == bias.length)
+  val size = iter.size
+  val metaSize = iter.metaSize
+  val out = Vector.withLength[Double, R](bias.length)
+
+  val hasNext = iter.hasNext
   def next = {
-    val v = iter.next
-    val m = this.m
-    val bias = this.bias
+    val bias = this.bias.v
     val random = this.random
-    val out = this.out
 
-    var i = 0
-    var y = 0
-    var x = 0
-    var sum = 0.0
-    val vLength = v.length
-    val mLength = m.length
-    while (i < mLength) {
-      sum += m(i) * v(x)
-      i += 1
-      x += 1
-      if (x == vLength) {
-        sum = 1.0 / (1.0 + exp(-sum - bias(y)))
-        out(y) = if (sum >= random.nextDouble()) 1 else 0
-        y += 1
-        x = 0
-        sum = 0.0
-      }
-    }
-    out
+    iter.next * (m, out) |< { (i, sum) => if (1.0 / (1.0 + exp(-sum - bias(i))) >= random.nextDouble()) 1.0 else 0.0 }
   }
-  def skip = iter.skip
+  val meta = iter.meta
+  val skip = iter.skip
 }
 
 class MatrixJob(
@@ -63,8 +49,8 @@ class MatrixJob(
 
 object MatrixWorker {
   private type AD = Array[Double]
-  class Builder private[MatrixWorker] (iter: DataIterator, random: FastRandom) {
-    def preStep(m: AD, bias: AD): Builder = {
+  class Builder private[MatrixWorker] (iter: DataIterator[Side.V, Side.V], random: FastRandom) {
+    def preStep(m: MatrixD[Side.V, Side.V], bias: VectorD[Side.V]): Builder = {
       new Builder(new WorkerStep(m, bias, iter, random), random)
     }
     def worker(state: State, config: ClientConfig) = {
@@ -84,15 +70,15 @@ object MatrixWorker {
     }
   }
 
-  def builder(iter: DataIterator) = new Builder(iter, new FastRandom)
+  def builder(iter: DataIterator[Side.V, Side.V]) = new Builder(iter, new FastRandom)
 }
 
 class MatrixWorker(
-  v0: Array[Byte],
-  h0: Array[Byte],
-  v1: Array[Byte],
-  h1: Array[Byte],
-  root: DataIterator,
+  v0: VectorD[Side.V],
+  h0: VectorD[Side.H],
+  v1: VectorD[Side.V],
+  h1: VectorD[Side.H],
+  root: DataIterator[Side.H, Side.V],
   sample: Double,
   random: FastRandom) extends ((=> Boolean) => Compute) {
   private type AB = Array[Byte]
@@ -104,60 +90,32 @@ class MatrixWorker(
     val v1 = this.v1
     val h1 = this.h1
 
-    val w = v0.length
-    val h = h0.length
-
     val sample = this.sample
 
-    val cd = new AL(w * h)
+    val cd = Matrix.withSize[Double, Side.V, Side.H](v0.length, h0.length)
+    
+    val v1h1 = Matrix.withSize[Double, Side.V, Side.H](v1.length, h1.length)
+    val v0h0 = Matrix.withSize[Double, Side.V, Side.H](v1.length, h1.length)
+    val v1v0 = Vector.withLength[Double, Side.V](v1.length)
+    val h1h0 = Vector.withLength[Double, Side.H](h1.length)
 
     val root = this.root
-    val vAct = new AL(w)
-    val hAct = new AL(h)
+    val vAct = v0.empty
+    val hAct = h0.empty
     var count: Long = 0
-    while (root.hasNext) {
+    while (root.hasNext()) {
       if (random.nextDouble < sample) {
         if (canceled) return null
         root.next
-        explode(v0, h0, v1, h1)(cd)
-        mergeActivations(v0, v1)(vAct)
-        mergeActivations(h0, h1)(hAct)
+        cd +< ((v1 ^ (h1, v1h1)) -> (v0 ^ (h0, v0h0)))
+        vAct +< (v1 - (v0, v1v0))
+        hAct +< (h1 - (h0, h1h0))
         count += 1
       } else {
-        root.skip
+        root.skip()
       }
     }
     Compute(cd, vAct, hAct, count)
-  }
-
-  def explode(v0: AB, h0: AB, v1: AB, h1: AB)(m: AL) {
-    var i = 0
-    var y = 0
-    var x = 0
-    var h1y = h0(y)
-    var h2y = h1(y)
-    val v1Length = v0.length
-    val mLength = m.length
-    while (i < mLength) {
-      if (x == v1Length) {
-        y += 1
-        x = 0
-        h1y = h0(y)
-        h2y = h1(y)
-      }
-      m(i) += v0(x) * h1y - v1(x) * h2y
-      i += 1
-      x += 1
-    }
-  }
-
-  def mergeActivations(a: AB, b: AB)(out: AL) = {
-    var i = 0
-    val outLength = out.length
-    while (i < outLength) {
-      out(i) += a(i) - b(i)
-      i += 1
-    }
   }
 }
 

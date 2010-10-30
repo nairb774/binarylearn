@@ -5,20 +5,25 @@ import java.net._
 
 import java.util.UUID
 
+import net.lag.configgy.Configgy
+import net.lag.logging.Logger
+
 import org.no.ip.bca.scala.{ ActiveProxy, InvokeIn, InvokeOut, LoggingSupport, Ranges }
 import org.no.ip.bca.scala.utils.actor.ReActor
 
-private object Bridge2 {
+object Bridge2 {
   trait ToClient extends ClientOutbound {
     def connect(client: ClientOutbound): Unit
   }
-  private class ToClientImpl extends ToClient with LoggingSupport {
+  private def getToClient: ToClient = ActiveProxy[ToClient](new ToClientImpl().asInstanceOf[ToClient])
+  private class ToClientImpl extends ToClient {
+    val logger = Logger.get
     private var clients = Set.empty[ClientOutbound]
     private var clientConfig: ClientConfig = null
     private var state: State = null
     private var ranges = Ranges.empty
     def connect(client: ClientOutbound): Unit = {
-      trace("CONNECT")
+      logger.trace("CONNECT")
       clients += client
       if (clientConfig != null) {
         client.newConfig(clientConfig)
@@ -28,18 +33,18 @@ private object Bridge2 {
       }
     }
     def newConfig(clientConfig: ClientConfig): Unit = {
-      trace("NEW CONFIG")
+      logger.trace("NEW CONFIG")
       this.clientConfig = clientConfig
       clients foreach { _.newConfig(clientConfig) }
     }
     def newWork(state: State, ranges: List[Ranges.Pair]): Unit = {
-      trace("NEW WORK")
+      logger.trace("NEW WORK")
       this.state = state
       this.ranges = Ranges(ranges)
       clients foreach { _.newWork(state, ranges) }
     }
     def assigned(id: UUID, range: Ranges.Pair): Unit = {
-      trace("ASSIGNED")
+      logger.trace("ASSIGNED")
       ranges /= range
       clients foreach { _.assigned(id, range) }
     }
@@ -79,12 +84,12 @@ private object Bridge2 {
   private class IIn(in: InputStream) extends InvokeIn(new DataInputStream(new BufferedInputStream(in))) {
     override def run = try { super.run } finally { System.exit(0) }
   }
-  
+
   private class IOut(out: OutputStream) extends InvokeOut(new DataOutputStream(new BufferedOutputStream(out))) {
     override def handleException(e: Throwable) = {
-        super.handleException(e)
-        System.exit(0)
-      }
+      super.handleException(e)
+      System.exit(0)
+    }
   }
 
   private def toServer(upstreamOut: OutputStream): ToServer = {
@@ -125,8 +130,9 @@ private object Bridge2 {
 class Bridge2 private (toClientInst: Bridge2.ToClient, toServerInst: Bridge2.ToServer) {
   private def this(in: InputStream, out: OutputStream) = this(Bridge2.toClient(in), Bridge2.toServer(out))
   private def this(toClientInst: Bridge2.ToClient, f: ClientOutbound => ServerOutbound) =
-    this(toClientInst, ActiveProxy(new Bridge2.ToServerImpl(f(toClientInst))))
-  private def this(f: ClientOutbound => ServerOutbound) = this(ActiveProxy(new Bridge2.ToClientImpl), f)
+    this(toClientInst, ActiveProxy[Bridge2.ToServer](new Bridge2.ToServerImpl(f(toClientInst)).asInstanceOf[Bridge2.ToServer]))
+  private def this(f: ClientOutbound => ServerOutbound) =
+    this(Bridge2.getToClient, f)
 
   private def add(downstreamIn: InputStream, downstreamOut: OutputStream) = {
     toClientInst.connect(Bridge2.clientOutbound(downstreamOut))
@@ -142,8 +148,10 @@ class Bridge2 private (toClientInst: Bridge2.ToClient, toServerInst: Bridge2.ToS
   }
 
   def listen(port: Int, soTimeout: Int): Unit = {
+    val log = Logger.get
     def loop(ssocket: ServerSocket, soTimeout: Int): Unit = {
       val socket = ssocket.accept
+      log.trace(socket.toString)
       socket.setSoTimeout(soTimeout)
       add(socket.getInputStream, socket.getOutputStream)
       loop(ssocket, soTimeout)

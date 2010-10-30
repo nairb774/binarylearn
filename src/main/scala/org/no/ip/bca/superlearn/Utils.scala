@@ -2,34 +2,7 @@ package org.no.ip.bca.superlearn
 
 import org.no.ip.bca.scala.{ FastRandom, Ranges }
 
-object DayBinParser {
-  import java.io._
-  import java.nio.channels.FileChannel.MapMode
-  import com.google.common.base.Charsets
-  import com.google.common.io.Files
-
-  private def using[T <: { def close(): Unit }, A](t: T)(f: T => A) = try { f(t) } finally { t.close() }
-
-  def main(args: Array[String]): Unit = {
-    val fIn = new File(args(0))
-    val fOut = new File(args(1))
-    using(new RandomAccessFile(fOut, "rw")) { _.setLength(822294 * 416) }
-    val map = Files.map(fOut, MapMode.READ_WRITE)
-    using(new BufferedReader(new InputStreamReader(new FileInputStream(fIn), Charsets.UTF_8))) { f =>
-      var line = f.readLine
-      while (line != null) {
-        map put {
-          line.substring(0, 416).toCharArray map { c =>
-            if (c == 'T') 1.toByte else 0.toByte
-          }
-        }
-        line = f.readLine
-      }
-    }
-    map.force
-  }
-}
-
+/*
 object MatrixTextWriter {
   import java.io._
   import java.nio._
@@ -72,47 +45,49 @@ object MatrixTextWriter {
     val serverState = try { inStream.readObject.asInstanceOf[ServerState] } finally { inStream.close }
     val state = serverState.state
     val r = new RandomAccessFile(outFile, "rw")
-    r.setLength((1 + state.weights.length + state.hidden.length + state.visible.length) * 8)
+    r.setLength((1 + state.weights.elementCount + state.hidden.length + state.visible.length) * 8)
     r.close
     val map = Files.map(outFile, MapMode.READ_WRITE)
     map.asIntBuffer.put(state.hidden.length).put(state.visible.length)
     map.position(8)
-    map.asDoubleBuffer.put(state.weights).put(state.hidden).put(state.visible)
+    map.asDoubleBuffer.put(state.weights.a).put(state.hidden.v).put(state.visible.v)
     map.force
-    println((f, minMax(state.weights), minMax(state.hidden), minMax(state.visible)))
+    println((f, minMax(state.weights.a), minMax(state.hidden.v), minMax(state.visible.v)))
   }
 }
 
 object MatrixWriter {
   import java.io._
   import java.nio._
-  import java.util._
+  //import java.util._
   def main(args: Array[String]): Unit = {
+    import math.{ Matrix, Vector }
+    import math.Implicits._
     val random = new FastRandom
     val props = new Props(args(0))
     val w = props.w
     val h = props.h
     val len = w * h
-    val weights = new Array[Double](len)
-    val visible = new Array[Double](w)
-    val hidden = new Array[Double](h)
+    val weights = Matrix.withSize[Double, Side.V, Side.H](w, h)
+    val visible = Vector.withLength[Double, Side.V](w)
+    val hidden = Vector.withLength[Double, Side.H](h)
     var i = 0
     while (i < len) {
-      weights(i) = 0.01 * random.nextDouble - 0.005
+      weights.a(i) = 0.01 * random.nextDouble - 0.005
       i += 1
     }
     i = 0
     while (i < w) {
-      visible(i) = 0.01 * random.nextDouble - 0.005
+      visible.v(i) = 0.01 * random.nextDouble - 0.005
       i += 1
     }
     i = 0
     while (i < h) {
-      hidden(i) = 0.01 * random.nextDouble - 0.005
+      hidden.v(i) = 0.01 * random.nextDouble - 0.005
       i += 1
     }
     val state = State(weights, hidden, visible)
-    val momentum = Momentum(new Array(len), new Array(h), new Array(w))
+    val momentum = Momentum(Matrix withSize (w, h), Vector withLength h, Vector withLength w)
     val score = Score(Double.NaN, Double.NaN, Double.NaN)
     val ss = ServerState(state, momentum, score)
     props.matrixRecorder.record(ss)
@@ -156,7 +131,8 @@ class Props(file: java.io.File) {
   lazy val memMapSource = {
     val dataFile = new File(props.getProperty("data.file"))
     val size = Integer.parseInt(props.getProperty("data.size"))
-    new MemMapSource(dataFile, size)
+    val metaSize = Integer.parseInt(props.getProperty("data.metasize"))
+    new MemMapSource(dataFile, size, metaSize)
   }
 
   lazy val matrixFolder = new File(props.getProperty("matrix.folder"))
@@ -175,3 +151,4 @@ class Props(file: java.io.File) {
     }
   }
 }
+*/

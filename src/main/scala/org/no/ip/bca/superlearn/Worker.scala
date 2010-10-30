@@ -1,18 +1,26 @@
 package org.no.ip.bca.superlearn
 
+import net.lag.configgy.Configgy
+
 import org.no.ip.bca.scala.FastRandom
+import math.{ Matrix, Vector }
+import math.Types._
 
 object Client {
   def main(args: Array[String]): Unit = {
-    val props = new Props(args(0))
-    val bridge = Bridge2.connect(props.serverHost, props.serverPort, props.timeout)
-    for (i <- 0 until props.processors) {
+    Configgy configure args(0)
+    val config = Configgy.config
+    config.registerWithJmx("org.no.ip.bca.superlearn")
+    
+    val bridge = Bridge2.connect(ConfigHelper.serverHost, ConfigHelper.serverPort, ConfigHelper.timeout)
+    for (i <- 0 until ConfigHelper.processors) {
       bridge add { serverOutbound =>
-        val client = new ClientActor(serverOutbound, props.memMapSource)
+        val client = new ClientActor(serverOutbound, ConfigHelper.memMapSource)
         client.start
         new ClientActorBridge(client)
       }
     }
+    // bridge.listen(ConfigHelper.serverPort, ConfigHelper.timeout)
   }
 }
 
@@ -24,48 +32,19 @@ import org.no.ip.bca.scala.utils.actor.ReActor
 
 case class ClientConfig(sample: Double, steps: Int)
 
-case class State(weights: Array[Double], hidden: Array[Double], visible: Array[Double]) {
+case class State(weights: MatrixD[Side.V, Side.H], hidden: VectorD[Side.H], visible: VectorD[Side.V]) {
   def w = visible.length
   def h = hidden.length
-  lazy val transposedWeights = {
-    val t = new Array[Double](weights.length)
-    var m = 0
-    var y = 0
-    var x = 0
-    val matrix = weights
-    val mLen = matrix.length
-    val w = this.w
-    val h = this.h
-    while (m < mLen) {
-      t(x * h + y) = matrix(m)
-      m += 1
-      x += 1
-      if (x == w) {
-        y += 1
-        x = 0
-      }
-    }
-    t
-  }
+  lazy val transposedWeights = weights.T
 }
 
-case class Compute(cd: Array[Long], vAct: Array[Long], hAct: Array[Long], count: Long) {
+case class Compute(cd: MatrixD[Side.V, Side.H], vAct: VectorD[Side.V], hAct: VectorD[Side.H], count: Long) {
   def +(c: Compute) = {
-    val newCd = sum(cd, c.cd)
-    val newVAct = sum(vAct, c.vAct)
-    val newHAct = sum(hAct, c.hAct)
+    import math.Implicits._
+    val newCd = c.cd <+> cd
+    val newVAct =c.vAct <+> vAct
+    val newHAct = c.hAct <+> hAct
     Compute(newCd, newVAct, newHAct, count + c.count)
-  }
-
-  def sum(a: Array[Long], b: Array[Long]) = {
-    val aLength = a.length
-    val c = new Array[Long](a.length)
-    var i = 0
-    while (i < aLength) {
-      c(i) = a(i) + b(i)
-      i += 1
-    }
-    c
   }
 }
 
@@ -91,8 +70,8 @@ trait ServerOutbound {
 }
 
 class ClientActor(
-    outbound: ServerOutbound,
-    memMapSource: MemMapSource) extends ReActor with LoggingSupport {
+  outbound: ServerOutbound,
+  memMapSource: MemMapSource) extends ReActor with LoggingSupport {
   import ClientActor._
   private type PF = PartialFunction[Any, Unit]
   private val id = UUID.randomUUID

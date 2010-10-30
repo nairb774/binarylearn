@@ -2,67 +2,51 @@ package org.no.ip.bca.superlearn
 
 import javax.management.ObjectName
 import java.lang.management.ManagementFactory
+import java.io.File
 import scala.reflect.BeanProperty
+import net.lag.configgy.Configgy
+import org.no.ip.bca.scala.Ranges
+
+object ConfigHelper {
+  lazy val fullRange = Ranges(0, Configgy.config("data.max").toInt)
+  lazy val imageFolder = new File(Configgy.config("image.folder"))
+  lazy val matrixFolder = new File(Configgy.config("matrix.folder"))
+  lazy val matrixRecorder = new MatrixRecorder(matrixFolder)
+  lazy val memMapSource = {
+    val dataFile = new File(Configgy.config("data.file"))
+    val size = Configgy.config("data.size").toInt
+    val metaSize = Configgy.config("data.metasize").toInt
+    new MemMapSource(dataFile, size, metaSize)
+  }
+  lazy val processors = Configgy.config.getInt("processors", Runtime.getRuntime.availableProcessors)
+  lazy val serverHost = Configgy.config("server.host")
+  lazy val serverPort = Configgy.config("server.port").toInt
+  lazy val state = {
+    val latest = matrixFolder.list.toList map { _.toLong } sort { _ < _ } last
+    val location = new File(matrixFolder, latest.toString)
+    val in = new java.io.ObjectInputStream(new java.io.BufferedInputStream(new java.io.FileInputStream(location)))
+    try {
+      in.readObject.asInstanceOf[ServerState]
+    } finally {
+      in.close
+    }
+  }
+  lazy val timeout = Configgy.config("timeout").toInt
+
+  def configState = {
+    val sample = Configgy.config("state.sample").toDouble
+    val steps = Configgy.config("state.steps").toInt
+    val epsilon = Configgy.config("state.epsilon").toDouble
+    ConfigState(sample, steps, epsilon)
+  }
+  def clientConfig = {
+    val configState = this.configState
+    ClientConfig(configState.sample, configState.steps)
+  }
+}
 
 case class ConfigState(
   sample: Double,
   steps: Int,
-  wMomentum: Double,
-  vMomentum: Double,
-  hMomentum: Double,
-  epsilon: Double,
-  weightcost: Double)
+  epsilon: Double)
 
-object Config {
-  val config = {
-    val config = new Config()
-    ManagementFactory.getPlatformMBeanServer.registerMBean(config, new ObjectName("org.no.ip.bca.superlearn.Config:name=config"))
-    config
-  }
-}
-
-trait ConfigMBean {
-  def getSample: Double
-  def setSample(sample: Double): Unit
-  def getSteps: Int
-  def setSteps(steps: Int): Unit
-  def getWMomentum: Double
-  def setWMomentum(wMomentum: Double): Unit
-  def getVMomentum: Double
-  def setVMomentum(vMomentum: Double): Unit
-  def getHMomentum: Double
-  def setHMomentum(hMomentum: Double): Unit
-  def getEpsilon: Double
-  def setEpsilon(epsilon: Double): Unit
-  def getWeightcost: Double
-  def setWeightcost(weightcost: Double): Unit
-}
-
-class Config private[Config] () extends ConfigMBean {
-  private var config = ConfigState(
-    sample = 1.0,
-    steps = 1,
-    wMomentum = 0.8,
-    vMomentum = 0.8,
-    hMomentum = 0.8,
-    epsilon = 0.001,
-    weightcost = 0.0001
-    )
-  def getSample = synchronized { config.sample }
-  def setSample(sample: Double) = synchronized { config = config copy (sample = sample) }
-  def getSteps = synchronized { config.steps }
-  def setSteps(steps: Int) = synchronized { config = config copy (steps = steps) }
-  def getWMomentum = synchronized { config.wMomentum }
-  def setWMomentum(wMomentum: Double) = synchronized { config = config copy (wMomentum = wMomentum) }
-  def getVMomentum = synchronized { config.vMomentum }
-  def setVMomentum(vMomentum: Double) = synchronized { config = config copy (vMomentum = vMomentum) }
-  def getHMomentum = synchronized { config.hMomentum }
-  def setHMomentum(hMomentum: Double) = synchronized { config = config copy (hMomentum = hMomentum) }
-  def getEpsilon = synchronized { config.epsilon }
-  def setEpsilon(epsilon: Double) = synchronized { config = config copy (epsilon = epsilon) }
-  def getWeightcost = synchronized { config.weightcost }
-  def setWeightcost(weightcost: Double) = synchronized { config = config copy (weightcost = weightcost) }
-  def state = synchronized { config }
-  def state_=(config: ConfigState) = synchronized { this.config = config }
-  def clientConfig = synchronized { ClientConfig(config.sample, config.steps) }
-}
