@@ -6,9 +6,7 @@ import net.lag.configgy.Configgy
 
 import org.no.ip.bca.scala.Ranges
 import org.no.ip.bca.scala.utils.actor.ReActor
-import math.{ Matrix, Vector }
-import math.Implicits._
-import math.Types._
+import math._
 
 object Server {
   import java.io._
@@ -18,35 +16,35 @@ object Server {
     Configgy configure args(0)
     val config = Configgy.config
     config.registerWithJmx("org.no.ip.bca.superlearn")
-    
+
     Bridge2 { clientOutbound =>
-      val server = new ServerActor(ConfigHelper.fullRange, ConfigHelper.matrixRecorder, ConfigHelper.state, clientOutbound)
+      val server = new ServerActor(ConfigHelper.fullRange, ConfigHelper.matrixRecorder, ConfigHelper.matrixRecorder.latestState, clientOutbound)
       server.start
       new ServerActorBridge(server)
     } listen (ConfigHelper.serverPort, ConfigHelper.timeout)
   }
 }
 
-final case class ServerState(state: State, compute: Compute, configState: ConfigState) {
-  def +(compute: Compute): ServerState = {
+final case class ServerState(state: State, momentum: State, compute: Compute, configState: ConfigState) {
+  def +(newCompute: Compute): ServerState = {
     val newConfig = ConfigHelper.configState
-    val newWeights = applyContrastiveDivergence(newConfig.epsilon, state.weights, compute.cd, compute.count)
-    val newVisibleBias = applyBiasCD(newConfig.epsilon, state.visible, compute.vAct, compute.count)
-    val newHiddenBias = applyBiasCD(newConfig.epsilon, state.hidden, compute.hAct, compute.count)
+    
+    val count = newCompute.count.toDouble
+    val cdNorm = newCompute.cd / count
+    val hActNorm = newCompute.hAct / count
+    val vActNorm = newCompute.vAct / count
+    
+    val newWeightMomentum = momentum.weights * newConfig.momentumMix + cdNorm * (1.0 - newConfig.momentumMix)
+    val newHiddenBiasMomentum = momentum.hidden * newConfig.momentumMix + hActNorm * (1.0 - newConfig.momentumMix)
+    val newVisibleBiasMomentum = momentum.visible * newConfig.momentumMix + vActNorm * (1.0 - newConfig.momentumMix)
+    val newMomentum = State(newWeightMomentum, newHiddenBiasMomentum, newVisibleBiasMomentum)
+    
+    val newWeights = state.weights + newWeightMomentum * newConfig.epsilon
+    val newHiddenBias = state.hidden + newHiddenBiasMomentum * newConfig.epsilon
+    val newVisibleBias = state.visible + newVisibleBiasMomentum * newConfig.epsilon
+    
     val newState = State(newWeights, newHiddenBias, newVisibleBias)
-    ServerState(newState, compute, newConfig)
-  }
-
-  private def applyContrastiveDivergence[L, R](epsilon: Double, weights: MatrixD[L, R], cd: MatrixD[L, R], count: Long) = {
-    val cdNorm = cd <*> (epsilon / count.toDouble)
-    val newWeights = weights <+> cdNorm
-    newWeights
-  }
-
-  private def applyBiasCD[S](epsilon: Double, bias: VectorD[S], cd: VectorD[S], count: Long) = {
-    val cdNorm = cd <*> (epsilon / count.toDouble)
-    val newBias = bias <+> cdNorm
-    newBias
+    ServerState(newState, newMomentum, newCompute, newConfig)
   }
 }
 
@@ -78,7 +76,6 @@ class ServerActor(
   private var clientConfig: ClientConfig = null
   private var outstanding = fullRange
   private var compute: Compute = null
-  private val slope = 0.99
 
   // Stats
   private var requests: Long = 0
@@ -88,7 +85,7 @@ class ServerActor(
   override def init: Unit = {
     sendToClient
   }
-  
+
   val reAct: PF = {
     case RecieveCompute(compute) => shift(compute)
     case Request(id, range) =>
@@ -111,7 +108,7 @@ class ServerActor(
     matrixRecorder.record(serverState)
     sendToClient
   }
-  
+
   private def sendToClient = {
     outstanding = fullRange
     val newState = serverState.state
@@ -125,6 +122,7 @@ class ServerActor(
     val time = System.nanoTime - timeStart
     timeStart = System.nanoTime
     if (sendClientConfig) {
+      println(clientConfig)
       client.newConfig(clientConfig)
     }
     client.newWork(newState, parts)

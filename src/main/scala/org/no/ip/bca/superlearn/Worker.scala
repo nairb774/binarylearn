@@ -3,8 +3,7 @@ package org.no.ip.bca.superlearn
 import net.lag.configgy.Configgy
 
 import org.no.ip.bca.scala.FastRandom
-import math.{ Matrix, Vector }
-import math.Types._
+import math._
 
 object Client {
   def main(args: Array[String]): Unit = {
@@ -32,18 +31,17 @@ import org.no.ip.bca.scala.utils.actor.ReActor
 
 case class ClientConfig(sample: Double, steps: Int)
 
-case class State(weights: MatrixD[Side.V, Side.H], hidden: VectorD[Side.H], visible: VectorD[Side.V]) {
+case class State(weights: Matrix[Side.V, Side.H], hidden: RVector[Side.H], visible: RVector[Side.V]) {
   def w = visible.length
   def h = hidden.length
   lazy val transposedWeights = weights.T
 }
 
-case class Compute(cd: MatrixD[Side.V, Side.H], vAct: VectorD[Side.V], hAct: VectorD[Side.H], count: Long) {
+case class Compute(cd: Matrix[Side.V, Side.H], vAct: RVector[Side.V], hAct: RVector[Side.H], count: Long) {
   def +(c: Compute) = {
-    import math.Implicits._
-    val newCd = c.cd <+> cd
-    val newVAct =c.vAct <+> vAct
-    val newHAct = c.hAct <+> hAct
+    val newCd = c.cd + cd
+    val newVAct =c.vAct + vAct
+    val newHAct = c.hAct + hAct
     Compute(newCd, newVAct, newHAct, count + c.count)
   }
 }
@@ -127,6 +125,7 @@ class ClientActor(
     case Assigned(_id, range) =>
       availableRanges /= range
       if (id == _id) {
+        assert(range == workingRange)
         success
       } else if (!(Ranges(range) & workingRange).isEmpty) {
         work.cancel(false)

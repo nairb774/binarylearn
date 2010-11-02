@@ -8,37 +8,82 @@ import javax.imageio._
 
 import net.lag.configgy.Configgy
 
+import org.no.ip.bca.scala.Ranges
+import math._
+
 object MatrixStats {
   def main(args: Array[String]): Unit = {
     Configgy configure args(0)
-    makeImages("cd-", 28 * 28, 28 * 28 / 2, { f => f.compute.cd.a map { _ / f.compute.count.toDouble }})
-    makeImages("weights-", 28 * 28, 28 * 28 / 2, f => f.state.weights.a)
+    //calcWeights
+    //println(">>")
+    project
+    /*
+    makeImages("cd-", { f => f.compute.cd | { _ / f.compute.count.toDouble } })
+    makeImages("weights-", f => f.state.weights)
+    ConfigHelper.matrixFolder.list.toList map { (_.toLong) } sort { _ < _ } drop 1 foreach { f =>
+      println((0 /: loadMatrix(f).compute.vAct.a)((c, v) => if (v == 0.0) c + 1 else c))
+      println((0 /: loadMatrix(f).compute.hAct.a)((c, v) => if (v == 0.0) c + 1 else c))
+    }
+    */
+  }
+  
+  def calcWeights = {
+    val list = ConfigHelper.matrixFolder.list.toList map { (_.toLong) } sort { _ < _ } drop 1
+    val weights = Matrix.withSize[Side.V, Side.H](28 * 28, 500)
+    (weights /: list) { (weights, id) =>
+      val matrix = loadMatrix(id)
+      val count = matrix.compute.count.toDouble
+      val cd = matrix.compute.cd / count
+      val angle = weights angle cd
+      println(180.0 * angle / Math.Pi)
+      weights * 0.9 + cd * 0.1
+    }
+  }
+  
+  def project = {
+    val list = ConfigHelper.matrixFolder.list.toList map { (_.toLong) } sort { _ < _ }
+    list.zipWithIndex foreach {
+      case (f, index) =>
+        val matrix = loadMatrix(f)
+        val iter = ConfigHelper.memMapSource.iter(Ranges.Pair(70, 71))
+        val worker = MatrixWorker.builder(iter).worker(matrix.state, ClientConfig(matrix.configState.sample, matrix.configState.steps))
+        worker.root.next
+        val bimg = new BufferedImage(28, 28, BufferedImage.TYPE_INT_RGB)
+        val data = worker.v1.a map { i => if (i == 1) 0xFFFFFF else 0 }
+        bimg.setRGB(0, 0, 28, 28, data, 0, 28)
+        var indexString = index.toString
+        while (indexString.length < 4) indexString = "0" + indexString
+        ImageIO.write(bimg, "png", new File(ConfigHelper.imageFolder, "project-" + indexString + ".png"))
+    }
   }
 
-  def makeImages(prefix: String, w: Int, h: Int, func: ServerState => Array[Double]) = {
+  def makeImages(prefix: String, func: ServerState => Matrix[_, _]) = {
     val list = ConfigHelper.matrixFolder.list.toList map { (_.toLong) } sort { _ < _ } drop 1
     val min = list map { f =>
-      val i = func(loadMatrix(f)).reduceLeft { _ min _ }
+      val i = func(loadMatrix(f)).reduce { _ min _ }
       println(i)
       i
     } reduceLeft { _ min _ }
     println("#")
     val max = list map { f =>
-      val i = func(loadMatrix(f)).reduceLeft { _ max _ }
+      val i = func(loadMatrix(f)).reduce { _ max _ }
       println(i)
       i
     } reduceLeft { _ min _ }
     println("#")
     val slope = 255.0 / (max - min)
     println(slope)
-    list.zipWithIndex foreach {
-      case (f, i) =>
-        val imgParts = func(loadMatrix(f)).map { v => val ii = ((v - min) * slope).toInt; (ii << 16) | (ii << 8) | ii }
-        val img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
-        img.setRGB(0, 0, w, h, imgParts, 0, w)
-        var iii = i.toString
-        while (iii.length < 4) iii = "0" + iii
-        ImageIO.write(img, "png", new File(ConfigHelper.imageFolder, prefix + iii + ".png"))
+    list.zipWithIndex drop 0 foreach {
+      case (f, index) =>
+        val matrix = func(loadMatrix(f))
+        val img = new BufferedImage(matrix.columns, matrix.rows, BufferedImage.TYPE_INT_RGB)
+        matrix foreach { (x, y, v) =>
+          val ii = ((v - min) * slope).toInt
+          img.setRGB(x, y, (ii << 16) | (ii << 8) | ii)
+        }
+        var indexString = index.toString
+        while (indexString.length < 4) indexString = "0" + indexString
+        ImageIO.write(img, "png", new File(ConfigHelper.imageFolder, prefix + indexString + ".png"))
     }
   }
 

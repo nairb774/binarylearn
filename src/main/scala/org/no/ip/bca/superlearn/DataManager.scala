@@ -6,26 +6,28 @@ import java.nio._
 import com.google.common.io.Files
 
 import org.no.ip.bca.scala.Ranges
-import math.Vector
-import math.Types._
+import math._
 
 trait DataIterator[S, M] {
   val size: Int
   val metaSize: Int
-  val out: VectorD[S]
+  val out: RVector[S]
   val hasNext: () => Boolean
-  def next: VectorD[S]
-  val meta: () => VectorD[M]
+  def next: RVector[S]
+  val meta: () => RVector[M]
   val skip: () => Unit
 }
 
 class MemMapSource(file: File, size: Int, metaSize: Int) {
   private val map = Files.map(file)
+  private val totalSize = size + metaSize
 
+  def at(point: Int) = totalSize * point
+  def at(point: Long) = totalSize * point
   def iter(range: Ranges.Pair) = {
-    val block = new Array[Byte]((size + metaSize) * (range.end - range.start).toInt)
+    val block = new Array[Byte]((at(range.end) - at(range.start)).toInt)
     synchronized {
-      map position range.start.toInt
+      map position at(range.start).toInt
       map.get(block)
     }
     new MemMapWalker(block, size, metaSize)
@@ -36,16 +38,16 @@ class MemMapWalker(block: Array[Byte], val size: Int, val metaSize: Int) extends
   private val totalSize = size + metaSize
   private var pos = 0
   private val count = block.length / totalSize
-  val out = Vector.withLength[Double, Side.V](size)
-  private val meta_ = Vector.withLength[Double, Side.V](metaSize)
+  val out = RVector.withLength[Side.V](size)
+  private val meta_ = RVector.withLength[Side.V](metaSize)
 
   val skip = { () => pos += 1 }
   def next = {
     var i = 0
     var j = pos * totalSize
-    val outv = out.v
+    val outa = out.a
     while (i < size) {
-      outv(i) = block(j)
+      outa(i) = block(j)
       i += 1
       j += 1
     }
@@ -56,9 +58,9 @@ class MemMapWalker(block: Array[Byte], val size: Int, val metaSize: Int) extends
   val meta = { () =>
     var i = 0
     var j = pos * totalSize - metaSize // Look at previous meta (assumes that next is called before meta)
-    val meta_v = meta_.v
+    val meta_a = meta_.a
     while (i < metaSize) {
-      meta_v(i) = block(j)
+      meta_a(i) = block(j)
       i += 1
       j += 1
     }
@@ -70,14 +72,14 @@ class MemMapWalker(block: Array[Byte], val size: Int, val metaSize: Int) extends
 class MetaMerge[S](iter: DataIterator[S, S]) extends DataIterator[S, S] {
   val size = iter.size + iter.metaSize
   val metaSize = 0
-  val out = Vector.withLength[Double, S](size)
+  val out = RVector.withLength[S](size)
   val skip = iter.skip
   val hasNext = iter.hasNext
   def next = {
-      val nextv = iter.next.v
-      System.arraycopy(nextv, 0, out.v, 0, nextv.length)
-      val metav = iter.meta().v
-      System.arraycopy(metav, 0, out.v, nextv.length, metav.length)
+      val nexta = iter.next.a
+      System.arraycopy(nexta, 0, out.a, 0, nexta.length)
+      val metaa = iter.meta().a
+      System.arraycopy(metaa, 0, out.a, nexta.length, metaa.length)
       out
   }
   val meta = { () => null }

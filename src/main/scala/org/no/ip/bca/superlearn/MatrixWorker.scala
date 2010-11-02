@@ -6,27 +6,27 @@ import java.util.concurrent.Callable
 
 import org.no.ip.bca.scala.{ FastRandom, Ranges }
 
-import math.{ Matrix, Vector }
-import math.Types._
-import math.Implicits._
+import math._
 
 class WorkerStep[L, R, M](
-  m: MatrixD[L, R],
-  bias: VectorD[R],
+  m: Matrix[L, R],
+  bias: RVector[R],
   iter: DataIterator[L, M],
   random: FastRandom) extends DataIterator[R, M] {
 
   assert(m.columns == bias.length)
   val size = iter.size
   val metaSize = iter.metaSize
-  val out = Vector.withLength[Double, R](bias.length)
+  val out = RVector.withLength[R](bias.length)
 
   val hasNext = iter.hasNext
   def next = {
-    val bias = this.bias.v
+    val bias = this.bias.a
     val random = this.random
-
-    iter.next * (m, out) |< { (i, sum) => if (1.0 / (1.0 + exp(-sum - bias(i))) >= random.nextDouble()) 1.0 else 0.0 }
+    
+    val res = iter.next * m | { (i, sum) => if (1.0 / (1.0 + exp(-sum - bias(i))) >= random.nextDouble()) 1.0 else 0.0 }
+    System.arraycopy(res.a, 0, out.a, 0, res.length)
+    out
   }
   val meta = iter.meta
   val skip = iter.skip
@@ -50,7 +50,7 @@ class MatrixJob(
 object MatrixWorker {
   private type AD = Array[Double]
   class Builder private[MatrixWorker] (iter: DataIterator[Side.V, Side.V], random: FastRandom) {
-    def preStep(m: MatrixD[Side.V, Side.V], bias: VectorD[Side.V]): Builder = {
+    def preStep(m: Matrix[Side.V, Side.V], bias: RVector[Side.V]): Builder = {
       new Builder(new WorkerStep(m, bias, iter, random), random)
     }
     def worker(state: State, config: ClientConfig) = {
@@ -74,11 +74,11 @@ object MatrixWorker {
 }
 
 class MatrixWorker(
-  v0: VectorD[Side.V],
-  h0: VectorD[Side.H],
-  v1: VectorD[Side.V],
-  h1: VectorD[Side.H],
-  root: DataIterator[Side.H, Side.V],
+  v0: RVector[Side.V],
+  h0: RVector[Side.H],
+  val v1: RVector[Side.V],
+  h1: RVector[Side.H],
+  val root: DataIterator[Side.H, Side.V],
   sample: Double,
   random: FastRandom) extends ((=> Boolean) => Compute) {
   private type AB = Array[Byte]
@@ -92,24 +92,26 @@ class MatrixWorker(
 
     val sample = this.sample
 
-    val cd = Matrix.withSize[Double, Side.V, Side.H](v0.length, h0.length)
-    
-    val v1h1 = Matrix.withSize[Double, Side.V, Side.H](v1.length, h1.length)
-    val v0h0 = Matrix.withSize[Double, Side.V, Side.H](v1.length, h1.length)
-    val v1v0 = Vector.withLength[Double, Side.V](v1.length)
-    val h1h0 = Vector.withLength[Double, Side.H](h1.length)
+    var cd = Matrix.withSize[Side.V, Side.H](v0.length, h0.length)
 
     val root = this.root
-    val vAct = v0.empty
-    val hAct = h0.empty
+    var vAct = v0.empty
+    var hAct = h0.empty
     var count: Long = 0
     while (root.hasNext()) {
       if (random.nextDouble < sample) {
         if (canceled) return null
         root.next
-        cd +< ((v1 ^ (h1, v1h1)) -> (v0 ^ (h0, v0h0)))
-        vAct +< (v1 - (v0, v1v0))
-        hAct +< (h1 - (h0, h1h0))
+        /*
+        println(v0)
+        println(h0)
+        println(v1)
+        println(h1)
+        println()
+        */
+        cd += (v0.T ^ h0) - (v1.T ^ h1) 
+        vAct += v0 - v1
+        hAct += h0 - h1
         count += 1
       } else {
         root.skip()
