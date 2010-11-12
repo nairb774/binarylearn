@@ -1,16 +1,12 @@
 package org.no.ip.bca.superlearn.math
 
 import java.util.Arrays
+import scala.math._
 import org.apache.commons.math.linear.ArrayRealVector
 import org.apache.commons.math.linear.BlockRealMatrix
-import org.apache.commons.math.linear.RealMatrixChangingVisitor
-import org.apache.commons.math.linear.RealMatrixPreservingVisitor
+import org.apache.commons.math.stat.StatUtils
 
-object Matrix {
-  def withSize[L, R](r: Int, c: Int): Matrix[L, R] =
-    new Matrix(new BlockRealMatrix(r, c))
-}
-
+/*
 @serializable
 abstract class Vector[T](val a: Array[Double]) {
   type Me[A] <: Vector[A]
@@ -34,6 +30,10 @@ abstract class Vector[T](val a: Array[Double]) {
     mkNew[O](b)
   }
   def |[O](f: Double => Double): Me[O] = this | { (_, v) => f(v) }
+  def mean = StatUtils mean a
+  def variance = StatUtils variance a
+  def variance(mean: Double) = StatUtils.variance(a, mean)
+  def array = a.clone
   override def toString = Arrays.toString(a)
 }
 
@@ -44,65 +44,130 @@ object RVector {
 final class RVector[T](a: Array[Double]) extends Vector[T](a) {
   type Me[A] = RVector[A]
   def mkNew[O](v: Array[Double]): Me[O] = new RVector(v)
-  def *[T, O](m: Matrix[T, O]): Me[O] = mkNew(m.m.preMultiply(a))
+  def *[T, O](m: CommonsMatrix[T, O]): Me[O] = mkNew(m.preMultiply(a))
   def T: CVector[T] = new CVector(a.clone)
 }
 
 final class CVector[T](a: Array[Double]) extends Vector[T](a) {
   type Me[A] = CVector[A]
   def mkNew[O](v: Array[Double]): Me[O] = new CVector(v)
-  def *[O, T](m: Matrix[O, T]): Me[O] = mkNew(m.m.operate(a))
+  def *[O, T](m: CommonsMatrix[O, T]): Me[O] = mkNew(m.operate(a))
   def T: RVector[T] = new RVector(a.clone)
-  def ^[O](c: RVector[O]): Matrix[T, O] = {
+  def ^[O](c: RVector[O]): CommonsMatrix[T, O] = {
     val am = new BlockRealMatrix(length, 1)
     am.setColumn(0, a)
     val bm = new BlockRealMatrix(1, c.length)
     bm.setRow(0, c.a)
-    new Matrix(am.multiply(bm))
+    new CommonsMatrix(am.multiply(bm))
   }
+}
+*/
+
+trait MatrixFactory[Type[A, B] <: MatrixBase[A, B]] {
+  def vector[T](len: Int): Type[T, Unit] = matrix(len, 1)
+  def matrix[L, R](rows: Int, columns: Int): Type[L, R]
+  def from[T](array: Array[Double]): Type[T, Unit] = from(Array(array))
+  def from[L, R](array: Array[Array[Double]]): Type[L, R]
+}
+
+object Matrix {
+  type Immutable[L, R] = CommonsMatrix[L, R]
+  type ImmutableV[T] = Immutable[T, Unit]
+  type Mutable[L, R] = JBlasMatrix[L, R]
+  type MutableV[T] = Mutable[T, Unit]
+  val immutable: MatrixFactory[Immutable] = CommonsMatrix
+  val mutable: MatrixFactory[Mutable] = JBlasMatrix
 }
 
 @serializable
-final class Matrix[L, R](val m: BlockRealMatrix) {
-  def this(a: Array[Array[Double]]) = this(new BlockRealMatrix(a))
-  def columns: Int = m.getColumnDimension
-  def rows: Int = m.getRowDimension
-  def +(d: Double): Matrix[L, R] = new Matrix(m.scalarAdd(d))
-  def +(other: Matrix[L, R]): Matrix[L, R] = new Matrix(m.add(other.m))
-  def -(d: Double): Matrix[L, R] = this + (-d)
-  def -(other: Matrix[L, R]): Matrix[L, R] = new Matrix(m.subtract(other.m))
-  def *(d: Double): Matrix[L, R] = new Matrix(m.scalarMultiply(d).asInstanceOf[BlockRealMatrix])
-  def *[O](other: Matrix[R, O]): Matrix[L, O] = new Matrix(m.multiply(other.m))
-  def /(d: Double): Matrix[L, R] = this * (1 / d)
-  def |[A, B](f: Double => Double): Matrix[A, B] = this | { (_, _, v) => f(v) }
-  def |[A, B](f: (Int, Int, Double) => Double): Matrix[A, B] = {
-    val o = m.copy
-    o.walkInOptimizedOrder(new RealMatrixChangingVisitor {
-      def start(rows: Int, columns: Int, startRow: Int, endRow: Int, startColumn: Int, endColumn: Int) = {}
-      def visit(row: Int, column: Int, value: Double) = f(column, row, value)
-      def end = 0.0
-    })
-    new Matrix(o)
+trait MatrixBase[L, R] { self =>
+  type Self[A, B] <: MatrixBase[A, B]
+  def columns: Int
+  def rows: Int
+  def size = rows * columns
+
+  def +(d: Double): Self[L, R]
+  def +(d: Double, out: Self[L, R]): Self[L, R]
+  def +(other: Self[L, R]): Self[L, R]
+  def +(other: Self[L, R], out: Self[L, R]): Self[L, R]
+
+  def -(d: Double): Self[L, R] = self + (-d)
+  def -(d: Double, out: Self[L, R]): Self[L, R] = self + (-d, out)
+  def -(other: Self[L, R]): Self[L, R]
+  def -(other: Self[L, R], out: Self[L, R]): Self[L, R]
+
+  def *(d: Double): Self[L, R]
+  def *(d: Double, out: Self[L, R]): Self[L, R]
+
+  def *[O](other: Self[R, O]): Self[L, O]
+  def *[O](other: Self[R, O], out: Self[L, O]): Self[L, O]
+
+  def /(d: Double): Self[L, R] = self * (1 / d)
+  def /(d: Double, out: Self[L, R]): Self[L, R] = self * (1 / d, out)
+
+  def T: Self[R, L]
+
+  def |[A, B](f: Double => Double): Self[A, B] = self | { (_, _, v) => f(v) }
+  def |[A, B](f: Double => Double, out: Self[A, B]): Self[A, B] = self | ({ (_, _, v) => f(v) }, out)
+
+  /** (column, row, value) */
+  def |[A, B](f: (Int, Int, Double) => Double): Self[A, B]
+  def |[A, B](f: (Int, Int, Double) => Double, out: Self[A, B]): Self[A, B]
+
+  def foreach(f: (Int, Int, Double) => Unit): Unit = self | ({ (c, r, v) => f(c, r, v); v }, self.asInstanceOf[Self[L, R]])
+
+  def zero: Self[L, R]
+  /** Row0, Row1, ... */
+  def asArray: Array[Double]
+  def mean = StatUtils mean asArray
+  def variance(mean: Double) = StatUtils variance (asArray, mean)
+}
+
+trait MatrixImmutable[L, R] extends MatrixBase[L, R] { self =>
+  type Self[A, B] <: MatrixImmutable[A, B]
+
+  def toMutable: Matrix.Mutable[L, R]
+}
+
+trait MatrixMutable[L, R] extends MatrixBase[L, R] { self =>
+  type Self[A, B] <: MatrixMutable[A, B]
+
+  def +=(d: Double): Self[L, R] = {
+    self.+(d, self.asInstanceOf[Self[L, R]])
+    self.asInstanceOf[Self[L, R]]
   }
-  def foreach(f: (Int, Int, Double) => Unit): Unit = {
-    m.walkInOptimizedOrder(new RealMatrixPreservingVisitor {
-      def start(rows: Int, columns: Int, startRow: Int, endRow: Int, startColumn: Int, endColumn: Int) = {}
-      def visit(row: Int, column: Int, value: Double) = f(column, row, value)
-      def end = 0.0
-    })
+
+  def +=(other: Self[L, R]): Self[L, R] = {
+    self.+(other, self.asInstanceOf[Self[L, R]])
+    self.asInstanceOf[Self[L, R]]
   }
-  def T: Matrix[R, L] = new Matrix(m.transpose)
-  def reduce(f: (Double, Double) => Double): Double = {
-    val data = m.getData()
-    (data(0).reduceLeft(f) /: data.drop(1)) { (a, b) => f(a, b.reduceLeft(f)) }
+
+  def -=(d: Double): Self[L, R] = {
+    self += -d
+    self.asInstanceOf[Self[L, R]]
   }
-  def angle(other: Matrix[L, R]): Double = {
-    val otherm = other.m
-    val sums = ((0.0, 0.0, 0.0) /: (0 until rows)) { (sum, i) =>
-      val mRow = m.getRowVector(i)
-      val otherRow = otherm.getRowVector(i)
-      (sum._1 + mRow.dotProduct(otherRow), sum._2 + mRow.dotProduct(mRow), sum._3 + otherRow.dotProduct(otherRow))
-    }
-    Math.acos(sums._1 / (Math.sqrt(sums._2) * Math.sqrt(sums._3)))
+
+  def -=(other: Self[L, R]): Self[L, R] = {
+    self.-(other, self.asInstanceOf[Self[L, R]])
+    self.asInstanceOf[Self[L, R]]
   }
+
+  def *=(d: Double): Self[L, R] = {
+    self.*(d, self.asInstanceOf[Self[L, R]])
+    self.asInstanceOf[Self[L, R]]
+  }
+
+  def /=(d: Double): Self[L, R] = self *= (1 / d)
+
+  def |=[A, B](f: Double => Double): Self[L, R] = self |= { (_, _, v) => f(v) }
+
+  /** (column, row, value) */
+  def |=(f: (Int, Int, Double) => Double): Self[L, R] = {
+    self.|(f, self.asInstanceOf[Self[L, R]])
+    self.asInstanceOf[Self[L, R]]
+  }
+
+  def `zero=`: Self[L, R]
+  
+  def toImmutable: Matrix.Immutable[L, R]
 }

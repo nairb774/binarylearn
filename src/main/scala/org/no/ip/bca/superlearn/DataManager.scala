@@ -6,15 +6,15 @@ import java.nio._
 import com.google.common.io.Files
 
 import org.no.ip.bca.scala.Ranges
-import math._
+import math.Matrix
 
 trait DataIterator[S, M] {
   val size: Int
   val metaSize: Int
-  val out: RVector[S]
+  val out: Matrix.MutableV[S]
   val hasNext: () => Boolean
-  def next: RVector[S]
-  val meta: () => RVector[M]
+  def next: Matrix.MutableV[S]
+  val meta: () => Matrix.MutableV[M]
   val skip: () => Unit
 }
 
@@ -38,31 +38,28 @@ class MemMapWalker(block: Array[Byte], val size: Int, val metaSize: Int) extends
   private val totalSize = size + metaSize
   private var pos = 0
   private val count = block.length / totalSize
-  val out = RVector.withLength[Side.V](size)
-  private val meta_ = RVector.withLength[Side.V](metaSize)
+  val out = Matrix.mutable.vector[Side.V](size)
+  val meta_ = Matrix.mutable.vector[Side.V](metaSize)
 
   val skip = { () => pos += 1 }
   def next = {
-    var i = 0
-    var j = pos * totalSize
-    val outa = out.a
-    while (i < size) {
-      outa(i) = block(j)
-      i += 1
-      j += 1
-    }
+    var offset = pos * totalSize
     pos += 1
-
+    var i = 0
+    val outa = out.asArray
+    while (i < size) {
+      outa(i) = block(offset + i)
+      i += 1
+    }
     out
   }
   val meta = { () =>
+    var offset = pos * totalSize - metaSize // Look at previous meta (assumes that next is called before meta)
     var i = 0
-    var j = pos * totalSize - metaSize // Look at previous meta (assumes that next is called before meta)
-    val meta_a = meta_.a
+    val metaa = meta_.asArray
     while (i < metaSize) {
-      meta_a(i) = block(j)
+      metaa(i) = block(offset + i)
       i += 1
-      j += 1
     }
     meta_
   }
@@ -72,15 +69,18 @@ class MemMapWalker(block: Array[Byte], val size: Int, val metaSize: Int) extends
 class MetaMerge[S](iter: DataIterator[S, S]) extends DataIterator[S, S] {
   val size = iter.size + iter.metaSize
   val metaSize = 0
-  val out = RVector.withLength[S](size)
+  val out = Matrix.mutable.vector[S](size)
   val skip = iter.skip
   val hasNext = iter.hasNext
   def next = {
-      val nexta = iter.next.a
-      System.arraycopy(nexta, 0, out.a, 0, nexta.length)
-      val metaa = iter.meta().a
-      System.arraycopy(metaa, 0, out.a, nexta.length, metaa.length)
-      out
+    val merged = new Array[Double](out.size)
+    val nexta = iter.next.asArray
+    System.arraycopy(nexta, 0, merged, 0, nexta.length)
+    val metaa = iter.meta().asArray
+    System.arraycopy(metaa, 0, merged, nexta.length, metaa.length)
+    // TODO: Fix!
+    out.`zero=` += Matrix.mutable.from[S](merged)
+    out
   }
   val meta = { () => null }
 }

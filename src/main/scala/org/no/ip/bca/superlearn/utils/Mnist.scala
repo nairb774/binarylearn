@@ -14,7 +14,7 @@ object MinstDataShow {
     val iter = source.iter(Ranges.Pair(args(2).toLong, args(2).toLong + 1))
     val img = iter.next
     val bimg = new BufferedImage(28, 28, BufferedImage.TYPE_INT_RGB)
-    val data = img.a map { i => if (i == 1) 0xFFFFFF else 0 }
+    val data = img.asArray map { i => if (i == 1) 0xFFFFFF else 0 }
     bimg.setRGB(0, 0, 28, 28, data, 0, 28)
     javax.imageio.ImageIO.write(bimg, "png", new File(args(1)))
     val i2 = iter.meta()

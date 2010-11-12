@@ -1,78 +1,55 @@
 package org.no.ip.bca.superlearn
 
-import java.util.UUID
-
-import net.lag.configgy.Configgy
-
-import org.no.ip.bca.scala.Ranges
-import org.no.ip.bca.scala.utils.actor.ReActor
 import math._
 
+import org.no.ip.bca.scala.Ranges
+import se.scalablesolutions.akka.actor.{Actor, ActorRef}
+import se.scalablesolutions.akka.remote.RemoteNode
+
 object Server {
-  import java.io._
-  import java.net._
-
   def main(args: Array[String]): Unit = {
-    Configgy configure args(0)
-    val config = Configgy.config
-    config.registerWithJmx("org.no.ip.bca.superlearn")
-
-    Bridge2 { clientOutbound =>
-      val server = new ServerActor(ConfigHelper.fullRange, ConfigHelper.matrixRecorder, ConfigHelper.matrixRecorder.latestState, clientOutbound)
-      server.start
-      new ServerActorBridge(server)
-    } listen (ConfigHelper.serverPort, ConfigHelper.timeout)
+    ConfigHelper.bootstrap
+    val server = Actor.actorOf(new ServerActor(ConfigHelper.fullRange, ConfigHelper.matrixRecorder)).start
+    RemoteNode.start(ConfigHelper.hostname, ConfigHelper.serverPort)
+    RemoteNode.register("bridge", Actor.actorOf(new Bridge(server)).start)
   }
 }
 
 final case class ServerState(state: State, momentum: State, compute: Compute, configState: ConfigState) {
   def +(newCompute: Compute): ServerState = {
     val newConfig = ConfigHelper.configState
-    
+
     val count = newCompute.count.toDouble
     val cdNorm = newCompute.cd / count
     val hActNorm = newCompute.hAct / count
     val vActNorm = newCompute.vAct / count
-    
+
     val newWeightMomentum = momentum.weights * newConfig.momentumMix + cdNorm * (1.0 - newConfig.momentumMix)
     val newHiddenBiasMomentum = momentum.hidden * newConfig.momentumMix + hActNorm * (1.0 - newConfig.momentumMix)
     val newVisibleBiasMomentum = momentum.visible * newConfig.momentumMix + vActNorm * (1.0 - newConfig.momentumMix)
     val newMomentum = State(newWeightMomentum, newHiddenBiasMomentum, newVisibleBiasMomentum)
-    
+
     val newWeights = state.weights + newWeightMomentum * newConfig.epsilon
     val newHiddenBias = state.hidden + newHiddenBiasMomentum * newConfig.epsilon
     val newVisibleBias = state.visible + newVisibleBiasMomentum * newConfig.epsilon
-    
+
     val newState = State(newWeights, newHiddenBias, newVisibleBias)
     ServerState(newState, newMomentum, newCompute, newConfig)
   }
 }
 
-private object ServerActor {
-  case class RecieveCompute(compute: Compute)
-  case class Request(id: UUID, range: Ranges.Pair)
-}
-
-trait ClientOutbound {
-  def newConfig(clientConfig: ClientConfig): Unit
-  def newWork(state: State, ranges: List[Ranges.Pair]): Unit
-  def assigned(id: UUID, range: Ranges.Pair): Unit
-}
-
-class ServerActorBridge(server: ServerActor) extends ServerOutbound {
-  import ServerActor._
-
-  def request(id: UUID, range: Ranges.Pair) = server ! Request(id, range)
-  def sendCompute(compute: Compute) = server ! RecieveCompute(compute)
+object ServerActor {
+  final case class RecieveCompute(compute: Compute)
+  final case class Request(range: Ranges.Pair)
+  final case object Connect
 }
 
 class ServerActor(
   fullRange: Ranges,
-  matrixRecorder: MatrixRecorder,
-  private var serverState: ServerState,
-  client: ClientOutbound) extends ReActor {
+  matrixRecorder: ActorRef) extends Actor {
   import ServerActor._
-  private type PF = PartialFunction[Any, Unit]
+  private var client: Option[ActorRef] = None
+  private var serverState: ServerState = null
   private var clientConfig: ClientConfig = null
   private var outstanding = fullRange
   private var compute: Compute = null
@@ -83,29 +60,38 @@ class ServerActor(
   private var timeStart = System.nanoTime
 
   override def init: Unit = {
+    serverState = matrixRecorder.!!(MatrixRecorder.Latest, ConfigHelper.timeout).getOrElse(throw new RuntimeException("Could not get latest state")).asInstanceOf[ServerState]
     sendToClient
   }
 
-  val reAct: PF = {
+  def receive = {
     case RecieveCompute(compute) => shift(compute)
-    case Request(id, range) =>
+    case Request(range) =>
       requests += 1
-      val a = if ((outstanding & range) == Ranges(range)) {
+      if ((outstanding & range) == Ranges(range)) {
         requestSuccess += 1
-        range
+        val id = self.sender.get.uuid
+        client foreach { _ ! ClientActor.Assigned(id, range) }
+        outstanding /= range
       } else if (outstanding.isEmpty) {
-        Ranges.Pair(0, 0)
+        // Do nothing
       } else {
-        outstanding.head.withMaxLength(range.end - range.start)
+        val newRange = outstanding.head.withMaxLength(range.end - range.start)
+        self forward Request(newRange)
       }
-      client.assigned(id, a)
-      outstanding /= a
+    case Connect =>
+      client = self.sender
+      client foreach { c =>
+        c ! ClientActor.NewConfig(ConfigHelper.clientConfig)
+        c ! ClientActor.NewState(serverState.state)
+        c ! ClientActor.NewRanges(outstanding.parts)
+      }
   }
 
   private def shift(compute: Compute) = {
     println("LOCK: " + requestSuccess.toDouble / requests.toDouble + " " + requests + " " + requestSuccess + " " + (requests - requestSuccess))
     serverState += compute
-    matrixRecorder.record(serverState)
+    matrixRecorder ! MatrixRecorder.Record(System.currentTimeMillis, serverState)
     sendToClient
   }
 
@@ -123,8 +109,11 @@ class ServerActor(
     timeStart = System.nanoTime
     if (sendClientConfig) {
       println(clientConfig)
-      client.newConfig(clientConfig)
+      client foreach { _ ! ClientActor.NewConfig(clientConfig) }
     }
-    client.newWork(newState, parts)
+    client foreach { c =>
+      c ! ClientActor.NewState(newState)
+      c ! ClientActor.NewRanges(parts)
+    }
   }
 }

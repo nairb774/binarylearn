@@ -33,20 +33,30 @@
             <version>r07</version>
         </dependency>
         <dependency>
-        	<groupId>net.lag</groupId>
-        	<artifactId>configgy</artifactId>
-        	<version>2.0.0</version>
-        	<exclusions>
-        		<exclusion>
-        			<artifactId>vscaladoc</artifactId>
-        			<groupId>org.scala-tools</groupId>
-        		</exclusion>
-        	</exclusions>
+            <groupId>net.lag</groupId>
+            <artifactId>configgy</artifactId>
+            <version>2.0.0</version>
+            <exclusions>
+                <exclusion>
+                    <artifactId>vscaladoc</artifactId>
+                    <groupId>org.scala-tools</groupId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
-        	<groupId>org.apache.commons</groupId>
-        	<artifactId>commons-math</artifactId>
-        	<version>2.1</version>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math</artifactId>
+            <version>2.1</version>
+        </dependency>
+        <dependency>
+            <groupId>se.scalablesolutions.akka</groupId>
+            <artifactId>akka-core_2.8.0</artifactId>
+            <version>0.10-nairb774</version>
+        </dependency>
+        <dependency>
+        	<groupId>org.jblas</groupId>
+        	<artifactId>jblas</artifactId>
+        	<version>1.1.1</version>
         </dependency>
     </dependencies>
     <build>
@@ -65,13 +75,14 @@
             <plugin>
                 <groupId>org.scala-tools</groupId>
                 <artifactId>maven-scala-plugin</artifactId>
-                <version>2.14.1</version>
+                <version>2.14.3</version>
                 <configuration>
                     <jvmArgs>
                         <jvmArg>-Xmx1024m</jvmArg>
                     </jvmArgs>
                     <args>
                         <arg>-deprecation</arg>
+                        <arg>-optimize</arg>
                     </args>
                 </configuration>
                 <executions>
@@ -80,11 +91,6 @@
                             <goal>compile</goal>
                             <goal>testCompile</goal>
                         </goals>
-                        <configuration>
-                            <args>
-                                <arg>-optimize</arg>
-                            </args>
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>
@@ -116,6 +122,28 @@
                 <enabled>true</enabled>
                 <checksumPolicy>warn</checksumPolicy>
                 <updatePolicy>never</updatePolicy>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>akka</id>
+            <url>http://www.scalablesolutions.se/akka/repository</url>
+            <releases>
+                <enabled>true</enabled>
+                <checksumPolicy>fail</checksumPolicy>
+                <updatePolicy>never</updatePolicy>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>akka-local</id>
+            <url>file:///home/brian/git/akka/repository</url>
+            <releases>
+                <enabled>true</enabled>
             </releases>
             <snapshots>
                 <enabled>false</enabled>

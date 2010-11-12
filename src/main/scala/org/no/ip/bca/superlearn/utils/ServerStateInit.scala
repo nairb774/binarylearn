@@ -1,31 +1,30 @@
 package org.no.ip.bca.superlearn
 package utils
 
-import net.lag.configgy.Configgy
-
 import org.no.ip.bca.scala.{ FastRandom, Ranges }
-
 import math._
+
+import se.scalablesolutions.akka.actor.Actor.actorOf
 
 object ServerStateInit {
   def main(args: Array[String]): Unit = {
-    val w = args(0).toInt
+    val recorder = ConfigHelper.matrixRecorder
+    val v = args(0).toInt
     val h = args(1).toInt
-    Configgy configure args(2)
 
     val span = 0.000001
     val halfSpan = span / 2.0
 
     val random = new FastRandom
 
-    val weights: Matrix[Side.V, Side.H] = Matrix.withSize(w, h) | { _ => span * random.nextDouble - halfSpan }
-    val visible = RVector.withLength[Side.V](w)
-    val hidden = RVector.withLength[Side.H](h)
+    val weights: Matrix.Immutable[Side.H, Side.V] = Matrix.immutable.matrix(h, v) | { _ => span * random.nextDouble - halfSpan }
+    val visible = Matrix.immutable.vector[Side.V](v)
+    val hidden = Matrix.immutable.vector[Side.H](h)
 
-    val momentum = State(Matrix withSize (w, h), RVector.withLength[Side.H](h), RVector.withLength[Side.V](w))
+    val momentum = State(Matrix.immutable.matrix(h, v), Matrix.immutable.vector[Side.H](h), Matrix.immutable.vector[Side.V](v))
     val state = State(weights, hidden, visible)
-    val compute = Compute(Matrix withSize (w, h), RVector.withLength[Side.V](w), RVector.withLength[Side.H](h), 0)
+    val compute = Compute(Matrix.immutable.matrix(h, v), Matrix.immutable.vector[Side.V](v), Matrix.immutable.vector[Side.H](h), 0)
     val ss = ServerState(state, momentum, compute, ConfigHelper.configState)
-    MatrixRecorder.handleState(System.currentTimeMillis, ss)
+    recorder ! MatrixRecorder.Record(System.currentTimeMillis, ss)
   }
 }
